@@ -1,0 +1,30 @@
+Source: libjaylink
+Priority: optional
+Maintainer: Christian M. Amsüss <chrysn@fsfe.org>
+Build-Depends: debhelper (>= 9), autotools-dev
+Standards-Version: 3.9.8
+Section: libs
+Homepage: http://git.zapb.de/libjaylink.git
+#Vcs-Git: git://anonscm.debian.org/collab-maint/libjaylink.git
+#Vcs-Browser: https://anonscm.debian.org/cgit/collab-maint/libjaylink.git
+
+Package: libjaylink-dev
+Section: libdevel
+Architecture: any
+Depends: libjaylink0 (= ${binary:Version}), ${misc:Depends}
+Description: library for interacting with J-Link programmers (development files)
+ libjaylink provides functions for interacting with Segger J-Link USB
+ devices, which are used for programming and debugging ARM chips. The
+ library is primarily used by OpenOCD, which provides a practical
+ interface for using the devices.
+ .
+ This package contains files needed to compile libjaylink applications.
+
+Package: libjaylink0
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: library for interacting with J-Link programmers
+ libjaylink provides functions for interacting with Segger J-Link USB
+ devices, which are used for programming and debugging ARM chips. The
+ library is primarily used by OpenOCD, which provides a practical
+ interface for using the devices.
