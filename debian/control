@@ -5,8 +5,8 @@ Build-Depends: debhelper (>= 9), autotools-dev
 Standards-Version: 3.9.8
 Section: libs
 Homepage: http://git.zapb.de/libjaylink.git
-#Vcs-Git: git://anonscm.debian.org/collab-maint/libjaylink.git
-#Vcs-Browser: https://anonscm.debian.org/cgit/collab-maint/libjaylink.git
+Vcs-Git: https://anonscm.debian.org/git/collab-maint/libjaylink.git -b debian
+Vcs-Browser: https://anonscm.debian.org/cgit/collab-maint/libjaylink.git
 
 Package: libjaylink-dev
 Section: libdevel
