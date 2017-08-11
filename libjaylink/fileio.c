@@ -17,9 +17,9 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <string.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <string.h>
 
 #include "libjaylink.h"
 #include "libjaylink-internal.h"
@@ -58,7 +58,8 @@
  * @param[in,out] devh Device handle.
  * @param[in] filename Name of the file to read from. The length of the name
  *                     must not exceed #JAYLINK_FILE_NAME_MAX_LENGTH bytes.
- * @param[out] buffer Buffer to store read data.
+ * @param[out] buffer Buffer to store read data on success. Its content is
+ *                    undefined on failure
  * @param[in] offset Offset in bytes relative to the beginning of the file from
  *                   where to start reading.
  * @param[in,out] length Number of bytes to read. On success, the value gets
@@ -67,8 +68,11 @@
  * @retval JAYLINK_OK Success.
  * @retval JAYLINK_ERR_ARG Invalid arguments.
  * @retval JAYLINK_ERR_TIMEOUT A timeout occurred.
+ * @retval JAYLINK_ERR_IO Input/output error.
  * @retval JAYLINK_ERR_DEV Unspecified device error, or the file was not found.
  * @retval JAYLINK_ERR Other error conditions.
+ *
+ * @since 0.1.0
  */
 JAYLINK_API int jaylink_file_read(struct jaylink_device_handle *devh,
 		const char *filename, uint8_t *buffer, uint32_t offset,
@@ -101,7 +105,8 @@ JAYLINK_API int jaylink_file_read(struct jaylink_device_handle *devh,
 	ret = transport_start_write(devh, 18 + filename_length, true);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_write() failed: %i.", ret);
+		log_err(ctx, "transport_start_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -126,35 +131,40 @@ JAYLINK_API int jaylink_file_read(struct jaylink_device_handle *devh,
 	ret = transport_write(devh, buf, 18 + filename_length);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_write() failed: %i.", ret);
+		log_err(ctx, "transport_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_start_read(devh, *length);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_read() failed: %i.", ret);
+		log_err(ctx, "transport_start_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_read(devh, buffer, *length);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_read() failed: %i.", ret);
+		log_err(ctx, "transport_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_start_read(devh, 4);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_read() failed: %i.", ret);
+		log_err(ctx, "transport_start_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_read(devh, buf, 4);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_read() failed: %i.", ret);
+		log_err(ctx, "transport_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -193,8 +203,11 @@ JAYLINK_API int jaylink_file_read(struct jaylink_device_handle *devh,
  * @retval JAYLINK_OK Success.
  * @retval JAYLINK_ERR_ARG Invalid arguments.
  * @retval JAYLINK_ERR_TIMEOUT A timeout occurred.
+ * @retval JAYLINK_ERR_IO Input/output error.
  * @retval JAYLINK_ERR_DEV Unspecified device error, or the file was not found.
  * @retval JAYLINK_ERR Other error conditions.
+ *
+ * @since 0.1.0
  */
 JAYLINK_API int jaylink_file_write(struct jaylink_device_handle *devh,
 		const char *filename, const uint8_t *buffer, uint32_t offset,
@@ -227,7 +240,8 @@ JAYLINK_API int jaylink_file_write(struct jaylink_device_handle *devh,
 	ret = transport_start_write(devh, 18 + filename_length, true);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_write() failed: %i.", ret);
+		log_err(ctx, "transport_start_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -252,35 +266,40 @@ JAYLINK_API int jaylink_file_write(struct jaylink_device_handle *devh,
 	ret = transport_write(devh, buf, 18 + filename_length);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_write() failed: %i.", ret);
+		log_err(ctx, "transport_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_start_write(devh, *length, true);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_write() failed: %i.", ret);
+		log_err(ctx, "transport_start_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_write(devh, buffer, *length);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_write() failed: %i.", ret);
+		log_err(ctx, "transport_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_start_read(devh, 4);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_read() failed: %i.", ret);
+		log_err(ctx, "transport_start_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_read(devh, buf, 4);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_read() failed: %i.", ret);
+		log_err(ctx, "transport_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -310,8 +329,11 @@ JAYLINK_API int jaylink_file_write(struct jaylink_device_handle *devh,
  * @retval JAYLINK_OK Success.
  * @retval JAYLINK_ERR_ARG Invalid arguments.
  * @retval JAYLINK_ERR_TIMEOUT A timeout occurred.
+ * @retval JAYLINK_ERR_IO Input/output error.
  * @retval JAYLINK_ERR_DEV Unspecified device error, or the file was not found.
  * @retval JAYLINK_ERR Other error conditions.
+ *
+ * @since 0.1.0
  */
 JAYLINK_API int jaylink_file_get_size(struct jaylink_device_handle *devh,
 		const char *filename, uint32_t *size)
@@ -337,7 +359,8 @@ JAYLINK_API int jaylink_file_get_size(struct jaylink_device_handle *devh,
 	ret = transport_start_write(devh, 6 + length, true);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_write() failed: %i.", ret);
+		log_err(ctx, "transport_start_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -354,21 +377,24 @@ JAYLINK_API int jaylink_file_get_size(struct jaylink_device_handle *devh,
 	ret = transport_write(devh, buf, 6 + length);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_write() failed: %i.", ret);
+		log_err(ctx, "transport_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_start_read(devh, 4);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_read() failed: %i.", ret);
+		log_err(ctx, "transport_start_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_read(devh, buf, 4);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_read() failed: %i.", ret);
+		log_err(ctx, "transport_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -395,8 +421,11 @@ JAYLINK_API int jaylink_file_get_size(struct jaylink_device_handle *devh,
  * @retval JAYLINK_OK Success.
  * @retval JAYLINK_ERR_ARG Invalid arguments.
  * @retval JAYLINK_ERR_TIMEOUT A timeout occurred.
+ * @retval JAYLINK_ERR_IO Input/output error.
  * @retval JAYLINK_ERR_DEV Unspecified device error, or the file was not found.
  * @retval JAYLINK_ERR Other error conditions.
+ *
+ * @since 0.1.0
  */
 JAYLINK_API int jaylink_file_delete(struct jaylink_device_handle *devh,
 		const char *filename)
@@ -422,7 +451,8 @@ JAYLINK_API int jaylink_file_delete(struct jaylink_device_handle *devh,
 	ret = transport_start_write(devh, 6 + length, true);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_write() failed: %i.", ret);
+		log_err(ctx, "transport_start_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -439,21 +469,24 @@ JAYLINK_API int jaylink_file_delete(struct jaylink_device_handle *devh,
 	ret = transport_write(devh, buf, 6 + length);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_write() failed: %i.", ret);
+		log_err(ctx, "transport_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_start_read(devh, 4);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_read() failed: %i.", ret);
+		log_err(ctx, "transport_start_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_read(devh, buf, 4);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_read() failed: %i.", ret);
+		log_err(ctx, "transport_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 

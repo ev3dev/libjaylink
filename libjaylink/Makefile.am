@@ -23,9 +23,8 @@ else
 lib_LTLIBRARIES = libjaylink.la
 
 library_includedir = $(includedir)/libjaylink
-library_include_HEADERS = \
-	libjaylink.h \
-	version.h
+library_include_HEADERS = libjaylink.h
+nodist_library_include_HEADERS = version.h
 endif
 
 libjaylink_la_SOURCES = \
@@ -39,6 +38,7 @@ libjaylink_la_SOURCES = \
 	jtag.c \
 	list.c \
 	log.c \
+	strutil.c \
 	swd.c \
 	swo.c \
 	target.c \
@@ -46,6 +46,8 @@ libjaylink_la_SOURCES = \
 	util.c \
 	version.c
 
-libjaylink_la_LDFLAGS = $(JAYLINK_LIB_LDFLAGS) -no-undefined
+libjaylink_la_CFLAGS = $(JAYLINK_CFLAGS) $(libusb_CFLAGS)
+libjaylink_la_LDFLAGS = $(JAYLINK_LDFLAGS) -no-undefined
+libjaylink_la_LIBADD = $(JAYLINK_LIBS) $(libusb_LIBS)
 
 noinst_HEADERS = libjaylink-internal.h

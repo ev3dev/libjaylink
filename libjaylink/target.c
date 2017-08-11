@@ -53,7 +53,12 @@
  * @retval JAYLINK_OK Success.
  * @retval JAYLINK_ERR_ARG Invalid arguments.
  * @retval JAYLINK_ERR_TIMEOUT A timeout occurred.
+ * @retval JAYLINK_ERR_IO Input/output error.
  * @retval JAYLINK_ERR Other error conditions.
+ *
+ * @see jaylink_get_speeds()
+ *
+ * @since 0.1.0
  */
 JAYLINK_API int jaylink_set_speed(struct jaylink_device_handle *devh,
 		uint16_t speed)
@@ -69,7 +74,8 @@ JAYLINK_API int jaylink_set_speed(struct jaylink_device_handle *devh,
 	ret = transport_start_write(devh, 3, true);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_write() failed: %i.", ret);
+		log_err(ctx, "transport_start_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -79,7 +85,8 @@ JAYLINK_API int jaylink_set_speed(struct jaylink_device_handle *devh,
 	ret = transport_write(devh, buf, 3);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_write() failed: %i.", ret);
+		log_err(ctx, "transport_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -90,7 +97,7 @@ JAYLINK_API int jaylink_set_speed(struct jaylink_device_handle *devh,
  * Retrieve target interface speeds.
  *
  * The speeds are applicable for the currently selected target interface only
- * and calulcated as follows:
+ * and calculated as follows:
  *
  * @par
  * <tt>speeds = @a freq / n</tt> with <tt>n >= @a div</tt>, where @p n is an
@@ -105,36 +112,36 @@ JAYLINK_API int jaylink_set_speed(struct jaylink_device_handle *devh,
  *       #JAYLINK_DEV_CAP_GET_SPEEDS capability.
  *
  * @param[in,out] devh Device handle.
- * @param[out] freq Base frequency in Hz on success, and undefined on failure.
- * @param[out] div Minimum divider on success, and undefined on failure.
+ * @param[out] speed Speed information on success, and undefined on failure.
  *
  * @retval JAYLINK_OK Success.
  * @retval JAYLINK_ERR_ARG Invalid arguments.
  * @retval JAYLINK_ERR_TIMEOUT A timeout occurred.
  * @retval JAYLINK_ERR_PROTO Protocol violation.
+ * @retval JAYLINK_ERR_IO Input/output error.
  * @retval JAYLINK_ERR Other error conditions.
  *
- * @see jaylink_select_interface() to select the target interface.
- * @see jaylink_get_selected_interface() to retrieve the currently selected
- *                                       interface.
- * @see jaylink_set_speed() to set the target interface speed.
+ * @see jaylink_select_interface()
+ *
+ * @since 0.1.0
  */
 JAYLINK_API int jaylink_get_speeds(struct jaylink_device_handle *devh,
-		uint32_t *freq, uint16_t *div)
+		struct jaylink_speed *speed)
 {
 	int ret;
 	struct jaylink_context *ctx;
 	uint8_t buf[6];
-	uint16_t dummy;
+	uint16_t div;
 
-	if (!devh || !freq || !div)
+	if (!devh || !speed)
 		return JAYLINK_ERR_ARG;
 
 	ctx = devh->dev->ctx;
 	ret = transport_start_write_read(devh, 1, 6, true);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_write_read() failed: %i.", ret);
+		log_err(ctx, "transport_start_write_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -143,26 +150,28 @@ JAYLINK_API int jaylink_get_speeds(struct jaylink_device_handle *devh,
 	ret = transport_write(devh, buf, 1);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_write() failed: %i.", ret);
+		log_err(ctx, "transport_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_read(devh, buf, 6);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_read() failed: %i.", ret);
+		log_err(ctx, "transport_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
-	dummy = buffer_get_u16(buf, 4);
+	div = buffer_get_u16(buf, 4);
 
-	if (!dummy) {
+	if (!div) {
 		log_err(ctx, "Minimum frequency divider is zero.");
 		return JAYLINK_ERR_PROTO;
 	}
 
-	*freq = buffer_get_u32(buf, 0);
-	*div = dummy;
+	speed->freq = buffer_get_u32(buf, 0);
+	speed->div = div;
 
 	return JAYLINK_OK;
 }
@@ -173,67 +182,76 @@ JAYLINK_API int jaylink_get_speeds(struct jaylink_device_handle *devh,
  * @note This function must only be used if the device has the
  *       #JAYLINK_DEV_CAP_SELECT_TIF capability.
  *
+ * @warning This function may return a value for @p prev_iface which is not
+ *          covered by #jaylink_target_interface.
+ *
  * @param[in,out] devh Device handle.
- * @param[in] interface Target interface to select.
- * @param[out] prev_interface Previously selected target interface on success,
- *                            and undefined on failure. Can be NULL.
+ * @param[in] iface Target interface to select.
+ * @param[out] prev_iface Previously selected target interface on success, and
+ *                        undefined on failure. Can be NULL.
  *
  * @retval JAYLINK_OK Success.
  * @retval JAYLINK_ERR_ARG Invalid arguments.
  * @retval JAYLINK_ERR_TIMEOUT A timeout occurred.
+ * @retval JAYLINK_ERR_IO Input/output error.
  * @retval JAYLINK_ERR Other error conditions.
  *
- * @see jaylink_get_caps() to retrieve device capabilities.
+ * @see jaylink_get_available_interfaces()
+ *
+ * @since 0.1.0
  */
 JAYLINK_API int jaylink_select_interface(struct jaylink_device_handle *devh,
-		enum jaylink_target_interface interface,
-		enum jaylink_target_interface *prev_interface)
+		enum jaylink_target_interface iface,
+		enum jaylink_target_interface *prev_iface)
 {
 	int ret;
 	struct jaylink_context *ctx;
 	uint8_t buf[4];
-	uint32_t tmp;
 
 	if (!devh)
 		return JAYLINK_ERR_ARG;
 
-	if (interface > JAYLINK_TIF_MAX)
+	switch (iface) {
+	case JAYLINK_TIF_JTAG:
+	case JAYLINK_TIF_SWD:
+	case JAYLINK_TIF_BDM3:
+	case JAYLINK_TIF_FINE:
+	case JAYLINK_TIF_2W_JTAG_PIC32:
+		break;
+	default:
 		return JAYLINK_ERR_ARG;
+	}
 
 	ctx = devh->dev->ctx;
 	ret = transport_start_write_read(devh, 2, 4, true);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_write_read() failed: %i.", ret);
+		log_err(ctx, "transport_start_write_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	buf[0] = CMD_SELECT_TIF;
-	buf[1] = interface;
+	buf[1] = iface;
 
 	ret = transport_write(devh, buf, 2);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_write() failed: %i.", ret);
+		log_err(ctx, "transport_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_read(devh, buf, 4);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_read() failed: %i.", ret);
+		log_err(ctx, "transport_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
-	tmp = buffer_get_u32(buf, 0);
-
-	if (tmp > JAYLINK_TIF_MAX) {
-		log_err(ctx, "Invalid target interface: %u.", tmp);
-		return JAYLINK_ERR;
-	}
-
-	if (prev_interface)
-		*prev_interface = tmp;
+	if (prev_iface)
+		*prev_iface = buffer_get_u32(buf, 0);
 
 	return JAYLINK_OK;
 }
@@ -250,32 +268,34 @@ JAYLINK_API int jaylink_select_interface(struct jaylink_device_handle *devh,
  *       #JAYLINK_DEV_CAP_SELECT_TIF capability.
  *
  * @param[in,out] devh Device handle.
- * @param[out] interfaces Target interfaces on success, and undefined on
- *                        failure.
+ * @param[out] ifaces Target interfaces on success, and undefined on failure.
  *
  * @retval JAYLINK_OK Success.
  * @retval JAYLINK_ERR_ARG Invalid arguments.
  * @retval JAYLINK_ERR_TIMEOUT A timeout occurred.
+ * @retval JAYLINK_ERR_IO Input/output error.
  * @retval JAYLINK_ERR Other error conditions.
  *
- * @see jaylink_get_caps() to retrieve device capabilities.
- * @see jaylink_select_interface() to select a target interface.
+ * @see jaylink_select_interface()
+ *
+ * @since 0.1.0
  */
 JAYLINK_API int jaylink_get_available_interfaces(
-		struct jaylink_device_handle *devh, uint32_t *interfaces)
+		struct jaylink_device_handle *devh, uint32_t *ifaces)
 {
 	int ret;
 	struct jaylink_context *ctx;
 	uint8_t buf[4];
 
-	if (!devh || !interfaces)
+	if (!devh || !ifaces)
 		return JAYLINK_ERR_ARG;
 
 	ctx = devh->dev->ctx;
 	ret = transport_start_write_read(devh, 2, 4, true);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_write_read() failed: %i.", ret);
+		log_err(ctx, "transport_start_write_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -285,18 +305,20 @@ JAYLINK_API int jaylink_get_available_interfaces(
 	ret = transport_write(devh, buf, 2);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_write() failed: %i.", ret);
+		log_err(ctx, "transport_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_read(devh, buf, 4);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_read() failed: %i.", ret);
+		log_err(ctx, "transport_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
-	*interfaces = buffer_get_u32(buf, 0);
+	*ifaces = buffer_get_u32(buf, 0);
 
 	return JAYLINK_OK;
 }
@@ -307,34 +329,40 @@ JAYLINK_API int jaylink_get_available_interfaces(
  * @note This function must only be used if the device has the
  *       #JAYLINK_DEV_CAP_SELECT_TIF capability.
  *
+ * @warning This function may return a value for @p iface which is not covered
+ *          by #jaylink_target_interface.
+ *
  * @param[in,out] devh Device handle.
- * @param[out] interface Selected target interface on success, and undefined on
- *                       failure.
+ * @param[out] iface Selected target interface on success, and undefined on
+ *                   failure.
  *
  * @retval JAYLINK_OK Success.
  * @retval JAYLINK_ERR_ARG Invalid arguments.
  * @retval JAYLINK_ERR_TIMEOUT A timeout occurred.
+ * @retval JAYLINK_ERR_IO Input/output error.
  * @retval JAYLINK_ERR Other error conditions.
  *
- * @see jaylink_get_caps() to retrieve device capabilities.
+ * @see jaylink_select_interface()
+ *
+ * @since 0.1.0
  */
 JAYLINK_API int jaylink_get_selected_interface(
 		struct jaylink_device_handle *devh,
-		enum jaylink_target_interface *interface)
+		enum jaylink_target_interface *iface)
 {
 	int ret;
 	struct jaylink_context *ctx;
 	uint8_t buf[4];
-	uint32_t tmp;
 
-	if (!devh || !interface)
+	if (!devh || !iface)
 		return JAYLINK_ERR_ARG;
 
 	ctx = devh->dev->ctx;
 	ret = transport_start_write_read(devh, 2, 4, true);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_write_read() failed: %i.", ret);
+		log_err(ctx, "transport_start_write_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -344,25 +372,20 @@ JAYLINK_API int jaylink_get_selected_interface(
 	ret = transport_write(devh, buf, 2);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_write() failed: %i.", ret);
+		log_err(ctx, "transport_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_read(devh, buf, 4);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_read() failed: %i.", ret);
+		log_err(ctx, "transport_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
-	tmp = buffer_get_u32(buf, 0);
-
-	if (tmp > JAYLINK_TIF_MAX) {
-		log_err(ctx, "Invalid target interface: %u.", tmp);
-		return JAYLINK_ERR;
-	}
-
-	*interface = tmp;
+	*iface = buffer_get_u32(buf, 0);
 
 	return JAYLINK_OK;
 }
@@ -375,7 +398,10 @@ JAYLINK_API int jaylink_get_selected_interface(
  * @retval JAYLINK_OK Success.
  * @retval JAYLINK_ERR_ARG Invalid arguments.
  * @retval JAYLINK_ERR_TIMEOUT A timeout occurred.
+ * @retval JAYLINK_ERR_IO Input/output error.
  * @retval JAYLINK_ERR Other error conditions.
+ *
+ * @since 0.1.0
  */
 JAYLINK_API int jaylink_clear_reset(struct jaylink_device_handle *devh)
 {
@@ -390,7 +416,8 @@ JAYLINK_API int jaylink_clear_reset(struct jaylink_device_handle *devh)
 	ret = transport_start_write(devh, 1, true);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_write() failed: %i.", ret);
+		log_err(ctx, "transport_start_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -399,7 +426,8 @@ JAYLINK_API int jaylink_clear_reset(struct jaylink_device_handle *devh)
 	ret = transport_write(devh, buf, 1);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_write() failed: %i.", ret);
+		log_err(ctx, "transport_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -414,7 +442,10 @@ JAYLINK_API int jaylink_clear_reset(struct jaylink_device_handle *devh)
  * @retval JAYLINK_OK Success.
  * @retval JAYLINK_ERR_ARG Invalid arguments.
  * @retval JAYLINK_ERR_TIMEOUT A timeout occurred.
+ * @retval JAYLINK_ERR_IO Input/output error.
  * @retval JAYLINK_ERR Other error conditions.
+ *
+ * @since 0.1.0
  */
 JAYLINK_API int jaylink_set_reset(struct jaylink_device_handle *devh)
 {
@@ -429,7 +460,8 @@ JAYLINK_API int jaylink_set_reset(struct jaylink_device_handle *devh)
 	ret = transport_start_write(devh, 1, true);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_write() failed: %i.", ret);
+		log_err(ctx, "transport_start_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -438,7 +470,8 @@ JAYLINK_API int jaylink_set_reset(struct jaylink_device_handle *devh)
 	ret = transport_write(devh, buf, 1);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_write() failed: %i.", ret);
+		log_err(ctx, "transport_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -446,7 +479,7 @@ JAYLINK_API int jaylink_set_reset(struct jaylink_device_handle *devh)
 }
 
 /**
- * Enable or disable the target power supply.
+ * Set the target power supply.
  *
  * If enabled, the target is supplied with 5 V from pin 19 of the 20-pin
  * JTAG / SWD connector.
@@ -454,16 +487,17 @@ JAYLINK_API int jaylink_set_reset(struct jaylink_device_handle *devh)
  * @note This function must only be used if the device has the
  *       #JAYLINK_DEV_CAP_SET_TARGET_POWER capability.
  *
- * @param devh Device handle.
- * @param enable Determines whether to enable or disable the target power
- *               supply.
+ * @param[in,out] devh Device handle.
+ * @param[in] enable Determines whether to enable or disable the target power
+ *                   supply.
  *
  * @retval JAYLINK_OK Success.
  * @retval JAYLINK_ERR_ARG Invalid arguments.
  * @retval JAYLINK_ERR_TIMEOUT A timeout occurred.
+ * @retval JAYLINK_ERR_IO Input/output error.
  * @retval JAYLINK_ERR Other error conditions.
  *
- * @see jaylink_get_caps() to retrieve device capabilities.
+ * @since 0.1.0
  */
 JAYLINK_API int jaylink_set_target_power(struct jaylink_device_handle *devh,
 		bool enable)
@@ -479,7 +513,8 @@ JAYLINK_API int jaylink_set_target_power(struct jaylink_device_handle *devh,
 	ret = transport_start_write(devh, 2, true);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_wrte() failed: %i.", ret);
+		log_err(ctx, "transport_start_wrte() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -489,7 +524,8 @@ JAYLINK_API int jaylink_set_target_power(struct jaylink_device_handle *devh,
 	ret = transport_write(devh, buf, 2);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_write() failed: %i.", ret);
+		log_err(ctx, "transport_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 

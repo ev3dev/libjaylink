@@ -67,8 +67,8 @@
  *
  * @param[in,out] devh Device handle.
  * @param[in] channel Channel to read data from.
- * @param[in] buffer Buffer to store read data on success. Its content is
- *                   undefined on failure.
+ * @param[out] buffer Buffer to store read data on success. Its content is
+ *                    undefined on failure.
  * @param[in,out] length Number of bytes to read. On success, the value gets
  *                       updated with the actual number of bytes read. Unless
  *                       otherwise specified, the value is undefined on
@@ -78,14 +78,17 @@
  * @retval JAYLINK_ERR_ARG Invalid arguments.
  * @retval JAYLINK_ERR_TIMEOUT A timeout occurred.
  * @retval JAYLINK_ERR_PROTO Protocol violation.
- * @retval JAYLINK_ERR_DEV Unspecified device error.
+ * @retval JAYLINK_ERR_IO Input/output error.
  * @retval JAYLINK_ERR_DEV_NOT_SUPPORTED Channel is not supported by the
  *                                       device.
  * @retval JAYLINK_ERR_DEV_NOT_AVAILABLE Channel is not available for the
  *                                       requested amount of data. @p length is
  *                                       updated with the number of bytes
  *                                       available on this channel.
+ * @retval JAYLINK_ERR_DEV Unspecified device error.
  * @retval JAYLINK_ERR Other error conditions.
+ *
+ * @since 0.1.0
  */
 JAYLINK_API int jaylink_emucom_read(struct jaylink_device_handle *devh,
 		uint32_t channel, uint8_t *buffer, uint32_t *length)
@@ -102,7 +105,8 @@ JAYLINK_API int jaylink_emucom_read(struct jaylink_device_handle *devh,
 	ret = transport_start_write_read(devh, 10, 4, true);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_write_read() failed: %i.", ret);
+		log_err(ctx, "transport_start_write_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -115,24 +119,23 @@ JAYLINK_API int jaylink_emucom_read(struct jaylink_device_handle *devh,
 	ret = transport_write(devh, buf, 10);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_write() failed: %i.", ret);
+		log_err(ctx, "transport_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_read(devh, buf, 4);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_read() failed: %i.", ret);
+		log_err(ctx, "transport_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	tmp = buffer_get_u32(buf, 0);
 
-	if (tmp == EMUCOM_ERR_NOT_SUPPORTED) {
-		log_err(ctx, "Channel 0x%x is not supported by the device.",
-			channel);
+	if (tmp == EMUCOM_ERR_NOT_SUPPORTED)
 		return JAYLINK_ERR_DEV_NOT_SUPPORTED;
-	}
 
 	if ((tmp & ~EMUCOM_AVAILABLE_BYTES_MASK) == EMUCOM_ERR_NOT_AVAILABLE) {
 		*length = tmp & EMUCOM_AVAILABLE_BYTES_MASK;
@@ -140,7 +143,8 @@ JAYLINK_API int jaylink_emucom_read(struct jaylink_device_handle *devh,
 	}
 
 	if (tmp & EMUCOM_ERR) {
-		log_err(ctx, "Failed to read from channel 0x%x.", channel);
+		log_err(ctx, "Failed to read from channel 0x%x: 0x%x.",
+			channel, tmp);
 		return JAYLINK_ERR_DEV;
 	}
 
@@ -158,14 +162,16 @@ JAYLINK_API int jaylink_emucom_read(struct jaylink_device_handle *devh,
 	ret = transport_start_read(devh, tmp);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_read() failed: %i.", ret);
+		log_err(ctx, "transport_start_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_read(devh, buffer, tmp);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_read() failed: %i.", ret);
+		log_err(ctx, "transport_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -189,9 +195,13 @@ JAYLINK_API int jaylink_emucom_read(struct jaylink_device_handle *devh,
  * @retval JAYLINK_ERR_ARG Invalid arguments.
  * @retval JAYLINK_ERR_TIMEOUT A timeout occurred.
  * @retval JAYLINK_ERR_PROTO Protocol violation.
+ * @retval JAYLINK_ERR_IO Input/output error.
+ * @retval JAYLINK_ERR_DEV_NOT_SUPPORTED Channel is not supported by the
+ *                                       device.
  * @retval JAYLINK_ERR_DEV Unspecified device error.
- * @retval JAYLINK_ERR_DEV_NOT_SUPPORTED Channel is not supported by the device.
  * @retval JAYLINK_ERR Other error conditions.
+ *
+ * @since 0.1.0
  */
 JAYLINK_API int jaylink_emucom_write(struct jaylink_device_handle *devh,
 		uint32_t channel, const uint8_t *buffer, uint32_t *length)
@@ -200,7 +210,6 @@ JAYLINK_API int jaylink_emucom_write(struct jaylink_device_handle *devh,
 	struct jaylink_context *ctx;
 	uint8_t buf[10];
 	uint32_t tmp;
-	int32_t dummy;
 
 	if (!devh || !buffer || !length)
 		return JAYLINK_ERR_ARG;
@@ -212,7 +221,8 @@ JAYLINK_API int jaylink_emucom_write(struct jaylink_device_handle *devh,
 	ret = transport_start_write(devh, 10, true);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_write() failed: %i.", ret);
+		log_err(ctx, "transport_start_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -225,43 +235,43 @@ JAYLINK_API int jaylink_emucom_write(struct jaylink_device_handle *devh,
 	ret = transport_write(devh, buf, 10);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_write() failed: %i.", ret);
+		log_err(ctx, "transport_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_start_write_read(devh, *length, 4, false);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_write_read() failed: %i.", ret);
+		log_err(ctx, "transport_start_write_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_write(devh, buffer, *length);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_write() failed: %i.", ret);
+		log_err(ctx, "transport_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_read(devh, buf, 4);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_read() failed: %i.", ret);
+		log_err(ctx, "transport_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	tmp = buffer_get_u32(buf, 0);
 
-	if (tmp == EMUCOM_ERR_NOT_SUPPORTED) {
-		log_err(ctx, "Channel 0x%x is not supported by the device.",
-			channel);
+	if (tmp == EMUCOM_ERR_NOT_SUPPORTED)
 		return JAYLINK_ERR_DEV_NOT_SUPPORTED;
-	}
 
-	dummy = tmp;
-
-	if (dummy < 0) {
-		log_err(ctx, "Failed to write to channel 0x%x.", channel);
+	if (tmp & EMUCOM_ERR) {
+		log_err(ctx, "Failed to write to channel 0x%x: 0x%x.",
+			channel, tmp);
 		return JAYLINK_ERR_DEV;
 	}
 

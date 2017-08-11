@@ -37,17 +37,20 @@
  * Set the libjaylink log level.
  *
  * @param[in,out] ctx libjaylink context.
- * @param[in] level Log level to set. See #jaylink_log_level for valid values.
+ * @param[in] level Log level to set.
  *
  * @retval JAYLINK_OK Success.
  * @retval JAYLINK_ERR_ARG Invalid arguments.
+ *
+ * @since 0.1.0
  */
-JAYLINK_API int jaylink_log_set_level(struct jaylink_context *ctx, int level)
+JAYLINK_API int jaylink_log_set_level(struct jaylink_context *ctx,
+		enum jaylink_log_level level)
 {
 	if (!ctx)
 		return JAYLINK_ERR_ARG;
 
-	if (level < JAYLINK_LOG_LEVEL_NONE || level > JAYLINK_LOG_LEVEL_DEBUG)
+	if (level > JAYLINK_LOG_LEVEL_DEBUG)
 		return JAYLINK_ERR_ARG;
 
 	ctx->log_level = level;
@@ -59,17 +62,22 @@ JAYLINK_API int jaylink_log_set_level(struct jaylink_context *ctx, int level)
  * Get the libjaylink log level.
  *
  * @param[in] ctx libjaylink context.
+ * @param[out] level Log level on success, and undefined on failure.
  *
- * @return The current log level on success, or a negative error code
- *         on failure. See #jaylink_log_level for a description of each
- *         individual log level.
+ * @retval JAYLINK_OK Success.
+ * @retval JAYLINK_ERR_ARG Invalid arguments.
+ *
+ * @since 0.1.0
  */
-JAYLINK_API int jaylink_log_get_level(const struct jaylink_context *ctx)
+JAYLINK_API int jaylink_log_get_level(const struct jaylink_context *ctx,
+		enum jaylink_log_level *level)
 {
-	if (!ctx)
+	if (!ctx || !level)
 		return JAYLINK_ERR_ARG;
 
-	return ctx->log_level;
+	*level = ctx->log_level;
+
+	return JAYLINK_OK;
 }
 
 /**
@@ -82,6 +90,8 @@ JAYLINK_API int jaylink_log_get_level(const struct jaylink_context *ctx)
  *
  * @retval JAYLINK_OK Success.
  * @retval JAYLINK_ERR_ARG Invalid arguments.
+ *
+ * @since 0.1.0
  */
 JAYLINK_API int jaylink_log_set_callback(struct jaylink_context *ctx,
 		jaylink_log_callback callback, void *user_data)
@@ -106,20 +116,22 @@ JAYLINK_API int jaylink_log_set_callback(struct jaylink_context *ctx,
  * The log domain is a string which is used as prefix for all log messages to
  * differentiate them from messages of other libraries.
  *
- * The maximum length of the log domain is #JAYLINK_LOG_DOMAIN_MAX_LENGTH bytes,
- * excluding the trailing null-terminator. A log domain which exceeds this
- * length will be silently truncated.
+ * The maximum length of the log domain is #JAYLINK_LOG_DOMAIN_MAX_LENGTH
+ * bytes, excluding the trailing null-terminator. A log domain which exceeds
+ * this length will be silently truncated.
  *
  * @param[in,out] ctx libjaylink context.
  * @param[in] domain Log domain to use. To set the default log domain, use
  *                   #JAYLINK_LOG_DOMAIN_DEFAULT.
  *
  * @retval JAYLINK_OK Success.
- * @retval JAYLINK_ERR Other error conditions.
  * @retval JAYLINK_ERR_ARG Invalid arguments.
+ * @retval JAYLINK_ERR Other error conditions.
+ *
+ * @since 0.1.0
  */
 JAYLINK_API int jaylink_log_set_domain(struct jaylink_context *ctx,
-		char *domain)
+		const char *domain)
 {
 	int ret;
 
@@ -143,6 +155,8 @@ JAYLINK_API int jaylink_log_set_domain(struct jaylink_context *ctx,
  * @return A string which contains the current log domain on success, or NULL
  *         on failure. The string is null-terminated and must not be free'd by
  *         the caller.
+ *
+ * @since 0.1.0
  */
 JAYLINK_API const char *jaylink_log_get_domain(
 		const struct jaylink_context *ctx)
@@ -154,8 +168,9 @@ JAYLINK_API const char *jaylink_log_get_domain(
 }
 
 /** @private */
-JAYLINK_PRIV int log_vprintf(const struct jaylink_context *ctx, int level,
-		const char *format, va_list args, void *user_data)
+JAYLINK_PRIV int log_vprintf(const struct jaylink_context *ctx,
+		enum jaylink_log_level level, const char *format, va_list args,
+		void *user_data)
 {
 	(void)user_data;
 

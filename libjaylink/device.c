@@ -1,7 +1,7 @@
 /*
  * This file is part of the libjaylink project.
  *
- * Copyright (C) 2014-2015 Marc Schink <jaylink-dev@marcschink.de>
+ * Copyright (C) 2014-2016 Marc Schink <jaylink-dev@marcschink.de>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,6 +21,12 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
+#ifdef _WIN32
+#include <winsock2.h>
+#else
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#endif
 #include <libusb.h>
 
 #include "libjaylink.h"
@@ -58,7 +64,8 @@
 /** @endcond */
 
 /** @private */
-JAYLINK_PRIV struct jaylink_device *device_allocate(struct jaylink_context *ctx)
+JAYLINK_PRIV struct jaylink_device *device_allocate(
+		struct jaylink_context *ctx)
 {
 	struct jaylink_device *dev;
 	struct list *list;
@@ -78,101 +85,128 @@ JAYLINK_PRIV struct jaylink_device *device_allocate(struct jaylink_context *ctx)
 	ctx->devs = list;
 
 	dev->ctx = ctx;
-	dev->refcnt = 1;
+	dev->ref_count = 1;
 	dev->usb_dev = NULL;
 
 	return dev;
 }
 
-/** @private */
-static struct jaylink_device_handle *allocate_device_handle(
-		struct jaylink_device *dev)
+static struct jaylink_device **allocate_device_list(size_t length)
 {
-	struct jaylink_device_handle *devh;
+	struct jaylink_device **list;
 
-	devh = malloc(sizeof(struct jaylink_device_handle));
+	list = malloc(sizeof(struct jaylink_device *) * (length + 1));
 
-	if (!devh)
+	if (!list)
 		return NULL;
 
-	devh->dev = jaylink_ref_device(dev);
+	list[length] = NULL;
 
-	return devh;
-}
-
-/** @private */
-static void free_device_handle(struct jaylink_device_handle *devh)
-{
-	jaylink_unref_device(devh->dev);
-	free(devh);
+	return list;
 }
 
 /**
- * Get a list of available devices.
+ * Get available devices.
  *
  * @param[in,out] ctx libjaylink context.
- * @param[out] devices Newly allocated array which contains instances of
- *                     available devices on success, and undefined on failure.
- *                     The array is NULL-terminated and must be free'd by the
- *                     caller with jaylink_free_device_list().
+ * @param[out] devs Newly allocated array which contains instances of available
+ *                  devices on success, and undefined on failure. The array is
+ *                  NULL-terminated and must be free'd by the caller with
+ *                  jaylink_free_devices().
+ * @param[out] count Number of available devices on success, and undefined on
+ *                   failure. Can be NULL.
  *
- * @return The length of the array excluding the trailing NULL-terminator, or a
- *         negative error code on failure.
+ * @retval JAYLINK_OK Success.
+ * @retval JAYLINK_ERR_ARG Invalid arguments.
+ * @retval JAYLINK_ERR_MALLOC Memory allocation error.
+ * @retval JAYLINK_ERR Other error conditions.
+ *
+ * @see jaylink_discovery_scan()
+ *
+ * @since 0.1.0
  */
-JAYLINK_API ssize_t jaylink_get_device_list(struct jaylink_context *ctx,
-		struct jaylink_device ***devices)
+JAYLINK_API int jaylink_get_devices(struct jaylink_context *ctx,
+		struct jaylink_device ***devs, size_t *count)
 {
-	if (!ctx || !devices)
+	size_t num;
+	struct list *item;
+	struct jaylink_device **tmp;
+	struct jaylink_device *dev;
+	size_t i;
+
+	if (!ctx || !devs)
 		return JAYLINK_ERR_ARG;
 
-	return discovery_get_device_list(ctx, devices);
+	num = list_length(ctx->discovered_devs);
+	tmp = allocate_device_list(num);
+
+	if (!tmp) {
+		log_err(ctx, "Failed to allocate device list.");
+		return JAYLINK_ERR_MALLOC;
+	}
+
+	item = ctx->discovered_devs;
+
+	for (i = 0; i < num; i++) {
+		dev = (struct jaylink_device *)item->data;
+		tmp[i] = jaylink_ref_device(dev);
+		item = item->next;
+	}
+
+	if (count)
+		*count = num;
+
+	*devs = tmp;
+
+	return JAYLINK_OK;
 }
 
 /**
- * Free a device list.
+ * Free devices.
  *
- * @param[in,out] devices Array of device instances. Must be NULL-terminated.
- * @param[in] unref_devices Determines whether the device instances should be
- *                          unreferenced.
+ * @param[in,out] devs Array of device instances. Must be NULL-terminated.
+ * @param[in] unref Determines whether the device instances should be
+ *                  unreferenced.
+ *
+ * @see jaylink_get_devices()
+ *
+ * @since 0.1.0
  */
-JAYLINK_API void jaylink_free_device_list(struct jaylink_device **devices,
-		bool unref_devices)
+JAYLINK_API void jaylink_free_devices(struct jaylink_device **devs, bool unref)
 {
 	size_t i;
 
-	if (!devices)
+	if (!devs)
 		return;
 
-	if (unref_devices) {
-		i = 0;
-
-		while (devices[i]) {
-			jaylink_unref_device(devices[i]);
-			i++;
-		}
+	if (unref) {
+		for (i = 0; devs[i]; i++)
+			jaylink_unref_device(devs[i]);
 	}
 
-	free(devices);
+	free(devs);
 }
 
 /**
  * Get the host interface of a device.
  *
  * @param[in] dev Device instance.
- * @param[out] interface Host interface of the device on success, and undefined
- *                       on failure.
+ * @param[out] iface Host interface of the device on success, and undefined on
+ *                   failure.
  *
  * @retval JAYLINK_OK Success.
  * @retval JAYLINK_ERR_ARG Invalid arguments.
+ *
+ * @since 0.1.0
  */
 JAYLINK_API int jaylink_device_get_host_interface(
 		const struct jaylink_device *dev,
-		enum jaylink_host_interface *interface)
+		enum jaylink_host_interface *iface)
 {
-	if (!dev || !interface)
+	if (!dev || !iface)
 		return JAYLINK_ERR_ARG;
 
-	*interface = dev->interface;
+	*iface = dev->interface;
 
 	return JAYLINK_OK;
 }
@@ -190,6 +224,8 @@ JAYLINK_API int jaylink_device_get_host_interface(
  * @retval JAYLINK_OK Success.
  * @retval JAYLINK_ERR_ARG Invalid arguments.
  * @retval JAYLINK_ERR_NOT_AVAILABLE Serial number is not available.
+ *
+ * @since 0.1.0
  */
 JAYLINK_API int jaylink_device_get_serial_number(
 		const struct jaylink_device *dev, uint32_t *serial_number)
@@ -219,9 +255,12 @@ JAYLINK_API int jaylink_device_get_serial_number(
  * @retval JAYLINK_ERR_ARG Invalid arguments.
  * @retval JAYLINK_ERR_NOT_SUPPORTED Operation not supported.
  *
- * @see jaylink_device_get_serial_number() to get the serial number of a device.
+ * @see jaylink_device_get_serial_number()
+ *
+ * @since 0.1.0
  */
-JAYLINK_API int jaylink_device_get_usb_address(const struct jaylink_device *dev,
+JAYLINK_API int jaylink_device_get_usb_address(
+		const struct jaylink_device *dev,
 		enum jaylink_usb_address *address)
 {
 	if (!dev || !address)
@@ -240,8 +279,9 @@ JAYLINK_API int jaylink_device_get_usb_address(const struct jaylink_device *dev,
  *
  * @param[in,out] dev Device instance.
  *
- * @return The given device instance on success, or NULL for invalid device
- *         instance.
+ * @return The given device instance on success, or NULL on invalid argument.
+ *
+ * @since 0.1.0
  */
 JAYLINK_API struct jaylink_device *jaylink_ref_device(
 		struct jaylink_device *dev)
@@ -249,7 +289,7 @@ JAYLINK_API struct jaylink_device *jaylink_ref_device(
 	if (!dev)
 		return NULL;
 
-	dev->refcnt++;
+	dev->ref_count++;
 
 	return dev;
 }
@@ -258,22 +298,53 @@ JAYLINK_API struct jaylink_device *jaylink_ref_device(
  * Decrement the reference count of a device.
  *
  * @param[in,out] dev Device instance.
+ *
+ * @since 0.1.0
  */
 JAYLINK_API void jaylink_unref_device(struct jaylink_device *dev)
 {
+	struct jaylink_context *ctx;
+
 	if (!dev)
 		return;
 
-	dev->refcnt--;
+	dev->ref_count--;
 
-	if (dev->refcnt == 0) {
-		dev->ctx->devs = list_remove(dev->ctx->devs, dev);
+	if (!dev->ref_count) {
+		ctx = dev->ctx;
+
+		log_dbg(ctx, "Device destroyed (bus:address = %03u:%03u).",
+			libusb_get_bus_number(dev->usb_dev),
+			libusb_get_device_address(dev->usb_dev));
+
+		ctx->devs = list_remove(dev->ctx->devs, dev);
 
 		if (dev->usb_dev)
 			libusb_unref_device(dev->usb_dev);
 
 		free(dev);
 	}
+}
+
+static struct jaylink_device_handle *allocate_device_handle(
+		struct jaylink_device *dev)
+{
+	struct jaylink_device_handle *devh;
+
+	devh = malloc(sizeof(struct jaylink_device_handle));
+
+	if (!devh)
+		return NULL;
+
+	devh->dev = jaylink_ref_device(dev);
+
+	return devh;
+}
+
+static void free_device_handle(struct jaylink_device_handle *devh)
+{
+	jaylink_unref_device(devh->dev);
+	free(devh);
 }
 
 /**
@@ -287,7 +358,10 @@ JAYLINK_API void jaylink_unref_device(struct jaylink_device *dev)
  * @retval JAYLINK_ERR_ARG Invalid arguments.
  * @retval JAYLINK_ERR_TIMEOUT A timeout occurred.
  * @retval JAYLINK_ERR_MALLOC Memory allocation error.
+ * @retval JAYLINK_ERR_IO Input/output error.
  * @retval JAYLINK_ERR Other error conditions.
+ *
+ * @since 0.1.0
  */
 JAYLINK_API int jaylink_open(struct jaylink_device *dev,
 		struct jaylink_device_handle **devh)
@@ -307,7 +381,7 @@ JAYLINK_API int jaylink_open(struct jaylink_device *dev,
 
 	ret = transport_open(handle);
 
-	if (ret < 0) {
+	if (ret != JAYLINK_OK) {
 		free_device_handle(handle);
 		return ret;
 	}
@@ -321,14 +395,24 @@ JAYLINK_API int jaylink_open(struct jaylink_device *dev,
  * Close a device.
  *
  * @param[in,out] devh Device instance.
+ *
+ * @retval JAYLINK_OK Success.
+ * @retval JAYLINK_ERR_ARG Invalid arguments.
+ * @retval JAYLINK_ERR Other error conditions.
+ *
+ * @since 0.1.0
  */
-JAYLINK_API void jaylink_close(struct jaylink_device_handle *devh)
+JAYLINK_API int jaylink_close(struct jaylink_device_handle *devh)
 {
-	if (!devh)
-		return;
+	int ret;
 
-	transport_close(devh);
+	if (!devh)
+		return JAYLINK_ERR_ARG;
+
+	ret = transport_close(devh);
 	free_device_handle(devh);
+
+	return ret;
 }
 
 /**
@@ -339,6 +423,8 @@ JAYLINK_API void jaylink_close(struct jaylink_device_handle *devh)
  * @param[in] devh Device handle.
  *
  * @return The device instance on success, or NULL on invalid argument.
+ *
+ * @since 0.1.0
  */
 JAYLINK_API struct jaylink_device *jaylink_get_device(
 		struct jaylink_device_handle *devh)
@@ -365,10 +451,14 @@ JAYLINK_API struct jaylink_device *jaylink_get_device(
  * @retval JAYLINK_ERR_ARG Invalid arguments.
  * @retval JAYLINK_ERR_TIMEOUT A timeout occurred.
  * @retval JAYLINK_ERR_MALLOC Memory allocation error.
+ * @retval JAYLINK_ERR_IO Input/output error.
  * @retval JAYLINK_ERR Other error conditions.
+ *
+ * @since 0.1.0
  */
-JAYLINK_API int jaylink_get_firmware_version(struct jaylink_device_handle *devh,
-		char **version, size_t *length)
+JAYLINK_API int jaylink_get_firmware_version(
+		struct jaylink_device_handle *devh, char **version,
+		size_t *length)
 {
 	int ret;
 	struct jaylink_context *ctx;
@@ -383,7 +473,8 @@ JAYLINK_API int jaylink_get_firmware_version(struct jaylink_device_handle *devh,
 	ret = transport_start_write_read(devh, 1, 2, true);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_write_read() failed: %i.", ret);
+		log_err(ctx, "transport_start_write_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -392,14 +483,16 @@ JAYLINK_API int jaylink_get_firmware_version(struct jaylink_device_handle *devh,
 	ret = transport_write(devh, buf, 1);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_write() failed: %i.", ret);
+		log_err(ctx, "transport_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_read(devh, buf, 2);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_read() failed: %i.", ret);
+		log_err(ctx, "transport_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -412,7 +505,8 @@ JAYLINK_API int jaylink_get_firmware_version(struct jaylink_device_handle *devh,
 	ret = transport_start_read(devh, dummy);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_read() failed: %i.", ret);
+		log_err(ctx, "transport_start_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -426,7 +520,8 @@ JAYLINK_API int jaylink_get_firmware_version(struct jaylink_device_handle *devh,
 	ret = transport_read(devh, (uint8_t *)tmp, dummy);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_read() failed: %i.", ret);
+		log_err(ctx, "transport_read() failed: %s.",
+			jaylink_strerror(ret));
 		free(tmp);
 		return ret;
 	}
@@ -457,7 +552,10 @@ JAYLINK_API int jaylink_get_firmware_version(struct jaylink_device_handle *devh,
  * @retval JAYLINK_OK Success.
  * @retval JAYLINK_ERR_ARG Invalid arguments.
  * @retval JAYLINK_ERR_TIMEOUT A timeout occurred.
+ * @retval JAYLINK_ERR_IO Input/output error.
  * @retval JAYLINK_ERR Other error conditions.
+ *
+ * @since 0.1.0
  */
 JAYLINK_API int jaylink_get_hardware_info(struct jaylink_device_handle *devh,
 		uint32_t mask, uint32_t *info)
@@ -485,7 +583,8 @@ JAYLINK_API int jaylink_get_hardware_info(struct jaylink_device_handle *devh,
 	ret = transport_start_write_read(devh, 5, length, true);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_write_read() failed: %i.", ret);
+		log_err(ctx, "transport_start_write_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -495,19 +594,22 @@ JAYLINK_API int jaylink_get_hardware_info(struct jaylink_device_handle *devh,
 	ret = transport_write(devh, buf, 5);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_write() failed: %i.", ret);
+		log_err(ctx, "transport_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_read(devh, (uint8_t *)info, length);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_read() failed: %i.", ret);
+		log_err(ctx, "transport_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	for (i = 0; i < num; i++)
-		info[i] = buffer_get_u32((uint8_t *)info, i * sizeof(uint32_t));
+		info[i] = buffer_get_u32((uint8_t *)info,
+			i * sizeof(uint32_t));
 
 	return JAYLINK_OK;
 }
@@ -518,17 +620,23 @@ JAYLINK_API int jaylink_get_hardware_info(struct jaylink_device_handle *devh,
  * @note This function must only be used if the device has the
  *       #JAYLINK_DEV_CAP_GET_HW_VERSION capability.
  *
+ * @warning This function may return a value for @p version where
+ *          #jaylink_hardware_version::type is not covered by
+ *          #jaylink_hardware_type.
+ *
  * @param[in,out] devh Device handle.
  * @param[out] version Hardware version on success, and undefined on failure.
  *
  * @retval JAYLINK_OK Success.
  * @retval JAYLINK_ERR_ARG Invalid arguments.
  * @retval JAYLINK_ERR_TIMEOUT A timeout occurred.
+ * @retval JAYLINK_ERR_IO Input/output error.
  * @retval JAYLINK_ERR Other error conditions.
  *
- * @see jaylink_get_caps() to retrieve device capabilities.
+ * @since 0.1.0
  */
-JAYLINK_API int jaylink_get_hardware_version(struct jaylink_device_handle *devh,
+JAYLINK_API int jaylink_get_hardware_version(
+		struct jaylink_device_handle *devh,
 		struct jaylink_hardware_version *version)
 {
 	int ret;
@@ -543,7 +651,8 @@ JAYLINK_API int jaylink_get_hardware_version(struct jaylink_device_handle *devh,
 	ret = transport_start_write_read(devh, 1, 4, true);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_write_read() failed: %i.", ret);
+		log_err(ctx, "transport_start_write_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -552,14 +661,16 @@ JAYLINK_API int jaylink_get_hardware_version(struct jaylink_device_handle *devh,
 	ret = transport_write(devh, buf, 1);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_write() failed: %i.", ret);
+		log_err(ctx, "transport_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_read(devh, buf, 4);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_read() failed: %i.", ret);
+		log_err(ctx, "transport_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -582,7 +693,10 @@ JAYLINK_API int jaylink_get_hardware_version(struct jaylink_device_handle *devh,
  * @retval JAYLINK_OK Success.
  * @retval JAYLINK_ERR_ARG Invalid arguments.
  * @retval JAYLINK_ERR_TIMEOUT A timeout occurred.
+ * @retval JAYLINK_ERR_IO Input/output error.
  * @retval JAYLINK_ERR Other error conditions.
+ *
+ * @since 0.1.0
  */
 JAYLINK_API int jaylink_get_hardware_status(struct jaylink_device_handle *devh,
 		struct jaylink_hardware_status *status)
@@ -598,7 +712,8 @@ JAYLINK_API int jaylink_get_hardware_status(struct jaylink_device_handle *devh,
 	ret = transport_start_write_read(devh, 1, 8, true);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_write_read() failed: %i.", ret);
+		log_err(ctx, "transport_start_write_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -607,14 +722,16 @@ JAYLINK_API int jaylink_get_hardware_status(struct jaylink_device_handle *devh,
 	ret = transport_write(devh, buf, 1);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_write() failed: %i.", ret);
+		log_err(ctx, "transport_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_read(devh, buf, 8);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_read() failed: %i.", ret);
+		log_err(ctx, "transport_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -642,15 +759,19 @@ JAYLINK_API int jaylink_get_hardware_status(struct jaylink_device_handle *devh,
  *
  * @param[in,out] devh Device handle.
  * @param[out] caps Buffer to store capabilities on success. Its content is
- *                  undefined on failure. The size of the buffer must be large
- *                  enough to contain at least #JAYLINK_DEV_CAPS_SIZE bytes.
+ *                  undefined on failure. The buffer must be large enough to
+ *                  contain at least #JAYLINK_DEV_CAPS_SIZE bytes.
  *
  * @retval JAYLINK_OK Success.
  * @retval JAYLINK_ERR_ARG Invalid arguments.
  * @retval JAYLINK_ERR_TIMEOUT A timeout occurred.
+ * @retval JAYLINK_ERR_IO Input/output error.
  * @retval JAYLINK_ERR Other error conditions.
  *
- * @see jaylink_get_extended_caps() to retrieve extended device capabilities.
+ * @see jaylink_get_extended_caps()
+ * @see jaylink_has_cap()
+ *
+ * @since 0.1.0
  */
 JAYLINK_API int jaylink_get_caps(struct jaylink_device_handle *devh,
 		uint8_t *caps)
@@ -666,7 +787,8 @@ JAYLINK_API int jaylink_get_caps(struct jaylink_device_handle *devh,
 	ret = transport_start_write_read(devh, 1, JAYLINK_DEV_CAPS_SIZE, true);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_write_read() failed: %i.", ret);
+		log_err(ctx, "transport_start_write_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -675,14 +797,16 @@ JAYLINK_API int jaylink_get_caps(struct jaylink_device_handle *devh,
 	ret = transport_write(devh, buf, 1);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_write() failed: %i.", ret);
+		log_err(ctx, "transport_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_read(devh, caps, JAYLINK_DEV_CAPS_SIZE);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_read() failed: %i.", ret);
+		log_err(ctx, "transport_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -703,15 +827,18 @@ JAYLINK_API int jaylink_get_caps(struct jaylink_device_handle *devh,
  *
  * @param[in,out] devh Device handle.
  * @param[out] caps Buffer to store capabilities on success. Its content is
- *                  undefined on failure. The size of the buffer must be large
- *                  enough to contain at least #JAYLINK_DEV_EXT_CAPS_SIZE bytes.
+ *                  undefined on failure. The buffer must be large enough to
+ *                  contain at least #JAYLINK_DEV_EXT_CAPS_SIZE bytes.
  *
  * @retval JAYLINK_OK Success.
  * @retval JAYLINK_ERR_ARG Invalid arguments.
  * @retval JAYLINK_ERR_TIMEOUT A timeout occurred.
+ * @retval JAYLINK_ERR_IO Input/output error.
  * @retval JAYLINK_ERR Other error conditions.
  *
- * @see jaylink_get_caps() to retrieve device capabilities.
+ * @see jaylink_get_caps()
+ *
+ * @since 0.1.0
  */
 JAYLINK_API int jaylink_get_extended_caps(struct jaylink_device_handle *devh,
 		uint8_t *caps)
@@ -728,7 +855,8 @@ JAYLINK_API int jaylink_get_extended_caps(struct jaylink_device_handle *devh,
 		true);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_write_read() failed: %i.", ret);
+		log_err(ctx, "transport_start_write_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -737,14 +865,16 @@ JAYLINK_API int jaylink_get_extended_caps(struct jaylink_device_handle *devh,
 	ret = transport_write(devh, buf, 1);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_write() failed: %i.", ret);
+		log_err(ctx, "transport_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_read(devh, caps, JAYLINK_DEV_EXT_CAPS_SIZE);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_read() failed: %i.", ret);
+		log_err(ctx, "transport_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -764,9 +894,10 @@ JAYLINK_API int jaylink_get_extended_caps(struct jaylink_device_handle *devh,
  * @retval JAYLINK_OK Success.
  * @retval JAYLINK_ERR_ARG Invalid arguments.
  * @retval JAYLINK_ERR_TIMEOUT A timeout occurred.
+ * @retval JAYLINK_ERR_IO Input/output error.
  * @retval JAYLINK_ERR Other error conditions.
  *
- * @see jaylink_get_caps() to retrieve device capabilities.
+ * @since 0.1.0
  */
 JAYLINK_API int jaylink_get_free_memory(struct jaylink_device_handle *devh,
 		uint32_t *size)
@@ -782,7 +913,8 @@ JAYLINK_API int jaylink_get_free_memory(struct jaylink_device_handle *devh,
 	ret = transport_start_write_read(devh, 1, 4, true);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_write_read() failed: %i.", ret);
+		log_err(ctx, "transport_start_write_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -791,14 +923,16 @@ JAYLINK_API int jaylink_get_free_memory(struct jaylink_device_handle *devh,
 	ret = transport_write(devh, buf, 1);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_write() failed: %i.", ret);
+		log_err(ctx, "transport_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_read(devh, buf, 4);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_read() failed: %i.", ret);
+		log_err(ctx, "transport_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -815,14 +949,17 @@ JAYLINK_API int jaylink_get_free_memory(struct jaylink_device_handle *devh,
  *
  * @param[in,out] devh Device handle.
  * @param[out] config Buffer to store configuration data on success. Its
- *                    content is undefined on failure. The size of the buffer
- *                    must be large enough to contain at least
+ *                    content is undefined on failure. The buffer must be large
+ *                    enough to contain at least
  *                    #JAYLINK_DEV_CONFIG_SIZE bytes.
  *
  * @retval JAYLINK_OK Success.
  * @retval JAYLINK_ERR_ARG Invalid arguments.
  * @retval JAYLINK_ERR_TIMEOUT A timeout occurred.
+ * @retval JAYLINK_ERR_IO Input/output error.
  * @retval JAYLINK_ERR Other error conditions.
+ *
+ * @since 0.1.0
  */
 JAYLINK_API int jaylink_read_raw_config(struct jaylink_device_handle *devh,
 		uint8_t *config)
@@ -839,7 +976,8 @@ JAYLINK_API int jaylink_read_raw_config(struct jaylink_device_handle *devh,
 		true);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_write_read() failed: %i.", ret);
+		log_err(ctx, "transport_start_write_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -848,14 +986,16 @@ JAYLINK_API int jaylink_read_raw_config(struct jaylink_device_handle *devh,
 	ret = transport_write(devh, buf, 1);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_write() failed: %i.", ret);
+		log_err(ctx, "transport_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_read(devh, config, JAYLINK_DEV_CONFIG_SIZE);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_read() failed: %i.", ret);
+		log_err(ctx, "transport_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -876,7 +1016,10 @@ JAYLINK_API int jaylink_read_raw_config(struct jaylink_device_handle *devh,
  * @retval JAYLINK_OK Success.
  * @retval JAYLINK_ERR_ARG Invalid arguments.
  * @retval JAYLINK_ERR_TIMEOUT A timeout occurred.
+ * @retval JAYLINK_ERR_IO Input/output error.
  * @retval JAYLINK_ERR Other error conditions.
+ *
+ * @since 0.1.0
  */
 JAYLINK_API int jaylink_write_raw_config(struct jaylink_device_handle *devh,
 		const uint8_t *config)
@@ -892,7 +1035,8 @@ JAYLINK_API int jaylink_write_raw_config(struct jaylink_device_handle *devh,
 	ret = transport_start_write(devh, 1 + JAYLINK_DEV_CONFIG_SIZE, true);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_write() failed: %i.", ret);
+		log_err(ctx, "transport_start_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -901,37 +1045,75 @@ JAYLINK_API int jaylink_write_raw_config(struct jaylink_device_handle *devh,
 	ret = transport_write(devh, buf, 1);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_write() failed: %i.", ret);
+		log_err(ctx, "transport_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_write(devh, config, JAYLINK_DEV_CONFIG_SIZE);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_write() failed: %i.", ret);
+		log_err(ctx, "transport_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	return JAYLINK_OK;
 }
 
-static void parse_conntable(struct jaylink_connection *conns,
+static void parse_conn_table(struct jaylink_connection *conns,
 		const uint8_t *buffer, uint16_t num, uint16_t entry_size)
 {
 	unsigned int i;
 	size_t offset;
+	struct in_addr in;
 
 	offset = 0;
 
 	for (i = 0; i < num; i++) {
 		conns[i].pid = buffer_get_u32(buffer, offset);
-		conns[i].hid = buffer_get_u32(buffer, offset + 4);
+
+		in.s_addr = buffer_get_u32(buffer, offset + 4);
+		/*
+		 * Use inet_ntoa() instead of inet_ntop() because the latter
+		 * requires at least Windows Vista.
+		 */
+		strcpy(conns[i].hid, inet_ntoa(in));
+
 		conns[i].iid = buffer[offset + 8];
 		conns[i].cid = buffer[offset + 9];
 		conns[i].handle = buffer_get_u16(buffer, offset + 10);
 		conns[i].timestamp = buffer_get_u32(buffer, offset + 12);
 		offset = offset + entry_size;
 	}
+}
+
+static bool _inet_pton(const char *str, struct in_addr *in)
+{
+#ifdef _WIN32
+	int ret;
+	struct sockaddr_in sock_in;
+	int length;
+
+	length = sizeof(sock_in);
+
+	/*
+	 * Use WSAStringToAddress() instead of inet_pton() because the latter
+	 * requires at least Windows Vista.
+	 */
+	ret = WSAStringToAddress((LPTSTR)str, AF_INET, NULL,
+		(LPSOCKADDR)&sock_in, &length);
+
+	if (ret != 0)
+		return false;
+
+	*in = sock_in.sin_addr;
+#else
+	if (inet_pton(AF_INET, str, in) != 1)
+		return false;
+#endif
+
+	return true;
 }
 
 /**
@@ -949,26 +1131,74 @@ static void parse_conntable(struct jaylink_connection *conns,
  * @note This function must only be used if the device has the
  *       #JAYLINK_DEV_CAP_REGISTER capability.
  *
+ * Example code:
+ * @code{.c}
+ * static bool register_connection(struct jaylink_device_handle *devh,
+ *                 struct jaylink_connection *conn)
+ * {
+ *         int ret;
+ *         struct jaylink_connection conns[JAYLINK_MAX_CONNECTIONS];
+ *         bool found_handle;
+ *         size_t count;
+ *         size_t i;
+ *
+ *         conn->handle = 0;
+ *         conn->pid = 0;
+ *         strcpy(conn->hid, "0.0.0.0");
+ *         conn->iid = 0;
+ *         conn->cid = 0;
+ *
+ *         ret = jaylink_register(devh, conn, conns, &count);
+ *
+ *         if (ret != JAYLINK_OK) {
+ *                 printf("jaylink_register() failed: %s.\n",
+ *                         jaylink_strerror(ret));
+ *                 return false;
+ *         }
+ *
+ *         found_handle = false;
+ *
+ *         for (i = 0; i < count; i++) {
+ *                 if (conns[i].handle == conn->handle) {
+ *                         found_handle = true;
+ *                         break;
+ *                 }
+ *         }
+ *
+ *         if (!found_handle) {
+ *                 printf("Maximum number of connections reached.\n");
+ *                 return false;
+ *         }
+ *
+ *         printf("Connection successfully registered.\n");
+ *
+ *         return true;
+ * }
+ * @endcode
+ *
  * @param[in,out] devh Device handle.
  * @param[in,out] connection Connection to register on the device.
  * @param[out] connections Array to store device connections on success.
  *                         Its content is undefined on failure. The array must
  *                         be large enough to contain at least
  *                         #JAYLINK_MAX_CONNECTIONS elements.
- * @param[out] info Buffer to store additional information on success, or NULL.
- *                  The content of the buffer is undefined on failure.
- * @param[out] info_size Size of the additional information in bytes on success,
- *                       and undefined on failure. Can be NULL.
+ * @param[out] count Number of device connections on success, and undefined on
+ *                   failure.
  *
- * @return The number of device connections on success, a negative error code on
- *         failure.
+ * @retval JAYLINK_OK Success.
+ * @retval JAYLINK_ERR_ARG Invalid arguments.
+ * @retval JAYLINK_ERR_TIMEOUT A timeout occurred.
+ * @retval JAYLINK_ERR_PROTO Protocol violation.
+ * @retval JAYLINK_ERR_IO Input/output error.
+ * @retval JAYLINK_ERR Other error conditions.
  *
- * @see jaylink_unregister() to unregister a connection from a device.
+ * @see jaylink_unregister()
+ *
+ * @since 0.1.0
  */
 JAYLINK_API int jaylink_register(struct jaylink_device_handle *devh,
 		struct jaylink_connection *connection,
-		struct jaylink_connection *connections, uint8_t *info,
-		uint16_t *info_size)
+		struct jaylink_connection *connections, size_t *count)
 {
 	int ret;
 	struct jaylink_context *ctx;
@@ -978,45 +1208,55 @@ JAYLINK_API int jaylink_register(struct jaylink_device_handle *devh,
 	uint16_t entry_size;
 	uint32_t size;
 	uint32_t table_size;
-	uint16_t addinfo_size;
+	uint16_t info_size;
+	struct in_addr in;
 
-	if (!devh || !connection || !connections)
+	if (!devh || !connection || !connections || !count)
 		return JAYLINK_ERR_ARG;
 
 	ctx = devh->dev->ctx;
-	ret = transport_start_write_read(devh, 14, REG_MIN_SIZE, true);
-
-	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_write_read() failed: %i.", ret);
-		return ret;
-	}
 
 	buf[0] = CMD_REGISTER;
 	buf[1] = REG_CMD_REGISTER;
 	buffer_set_u32(buf, connection->pid, 2);
-	buffer_set_u32(buf, connection->hid, 6);
+
+	if (!_inet_pton(connection->hid, &in))
+		return JAYLINK_ERR_ARG;
+
+	buffer_set_u32(buf, in.s_addr, 6);
+
 	buf[10] = connection->iid;
 	buf[11] = connection->cid;
 	buffer_set_u16(buf, connection->handle, 12);
 
+	ret = transport_start_write_read(devh, 14, REG_MIN_SIZE, true);
+
+	if (ret != JAYLINK_OK) {
+		log_err(ctx, "transport_start_write_read() failed: %s.",
+			jaylink_strerror(ret));
+		return ret;
+	}
+
 	ret = transport_write(devh, buf, 14);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_write() failed: %i.", ret);
+		log_err(ctx, "transport_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_read(devh, buf, REG_MIN_SIZE);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_read() failed: %i.", ret);
+		log_err(ctx, "transport_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	handle = buffer_get_u16(buf, 0);
 	num = buffer_get_u16(buf, 2);
 	entry_size = buffer_get_u16(buf, 4);
-	addinfo_size = buffer_get_u16(buf, 6);
+	info_size = buffer_get_u16(buf, 6);
 
 	if (num > JAYLINK_MAX_CONNECTIONS) {
 		log_err(ctx, "Maximum number of device connections exceeded: "
@@ -1031,7 +1271,7 @@ JAYLINK_API int jaylink_register(struct jaylink_device_handle *devh,
 	}
 
 	table_size = num * entry_size;
-	size = REG_HEADER_SIZE + table_size + addinfo_size;
+	size = REG_HEADER_SIZE + table_size + info_size;
 
 	if (size > REG_MAX_SIZE) {
 		log_err(ctx, "Maximum registration information size exceeded: "
@@ -1043,7 +1283,8 @@ JAYLINK_API int jaylink_register(struct jaylink_device_handle *devh,
 		ret = transport_start_read(devh, size - REG_MIN_SIZE);
 
 		if (ret != JAYLINK_OK) {
-			log_err(ctx, "transport_start_read() failed: %i.", ret);
+			log_err(ctx, "transport_start_read() failed: %s.",
+				jaylink_strerror(ret));
 			return JAYLINK_ERR;
 		}
 
@@ -1051,7 +1292,8 @@ JAYLINK_API int jaylink_register(struct jaylink_device_handle *devh,
 			size - REG_MIN_SIZE);
 
 		if (ret != JAYLINK_OK) {
-			log_err(ctx, "transport_read() failed: %i.", ret);
+			log_err(ctx, "transport_read() failed: %s.",
+				jaylink_strerror(ret));
 			return JAYLINK_ERR;
 		}
 	}
@@ -1062,15 +1304,11 @@ JAYLINK_API int jaylink_register(struct jaylink_device_handle *devh,
 	}
 
 	connection->handle = handle;
-	parse_conntable(connections, buf + REG_HEADER_SIZE, num, entry_size);
+	parse_conn_table(connections, buf + REG_HEADER_SIZE, num, entry_size);
 
-	if (info)
-		memcpy(info, buf + REG_HEADER_SIZE + table_size, addinfo_size);
+	*count = num;
 
-	if (info_size)
-		*info_size = addinfo_size;
-
-	return num;
+	return JAYLINK_OK;
 }
 
 /**
@@ -1085,18 +1323,23 @@ JAYLINK_API int jaylink_register(struct jaylink_device_handle *devh,
  *                         Its content is undefined on failure. The array must
  *                         be large enough to contain at least
  *                         #JAYLINK_MAX_CONNECTIONS elements.
- * @param[out] info Buffer to store additional information on success, or NULL.
- *                  The content of the buffer is undefined on failure.
- * @param[out] info_size Size of the additional information in bytes on success,
- *                       and undefined on failure. Can be NULL.
+ * @param[out] count Number of device connections on success, and undefined on
+ *                   failure.
  *
- * @return The number of device connections on success, a negative error code on
- *         failure.
+ * @retval JAYLINK_OK Success.
+ * @retval JAYLINK_ERR_ARG Invalid arguments.
+ * @retval JAYLINK_ERR_TIMEOUT A timeout occurred.
+ * @retval JAYLINK_ERR_PROTO Protocol violation.
+ * @retval JAYLINK_ERR_IO Input/output error.
+ * @retval JAYLINK_ERR Other error conditions.
+ *
+ * @see jaylink_register()
+ *
+ * @since 0.1.0
  */
 JAYLINK_API int jaylink_unregister(struct jaylink_device_handle *devh,
 		const struct jaylink_connection *connection,
-		struct jaylink_connection *connections, uint8_t *info,
-		uint16_t *info_size)
+		struct jaylink_connection *connections, size_t *count)
 {
 	int ret;
 	struct jaylink_context *ctx;
@@ -1105,44 +1348,54 @@ JAYLINK_API int jaylink_unregister(struct jaylink_device_handle *devh,
 	uint16_t entry_size;
 	uint32_t size;
 	uint32_t table_size;
-	uint16_t addinfo_size;
+	uint16_t info_size;
+	struct in_addr in;
 
-	if (!devh || !connection || !connections)
+	if (!devh || !connection || !connections || !count)
 		return JAYLINK_ERR_ARG;
 
 	ctx = devh->dev->ctx;
-	ret = transport_start_write_read(devh, 14, REG_MIN_SIZE, true);
-
-	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_write_read() failed: %i.", ret);
-		return ret;
-	}
 
 	buf[0] = CMD_REGISTER;
 	buf[1] = REG_CMD_UNREGISTER;
 	buffer_set_u32(buf, connection->pid, 2);
-	buffer_set_u32(buf, connection->hid, 6);
+
+	if (!_inet_pton(connection->hid, &in))
+		return JAYLINK_ERR_ARG;
+
+	buffer_set_u32(buf, in.s_addr, 6);
+
 	buf[10] = connection->iid;
 	buf[11] = connection->cid;
 	buffer_set_u16(buf, connection->handle, 12);
 
+	ret = transport_start_write_read(devh, 14, REG_MIN_SIZE, true);
+
+	if (ret != JAYLINK_OK) {
+		log_err(ctx, "transport_start_write_read() failed: %s.",
+			jaylink_strerror(ret));
+		return ret;
+	}
+
 	ret = transport_write(devh, buf, 14);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_write() failed: %i.", ret);
+		log_err(ctx, "transport_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_read(devh, buf, REG_MIN_SIZE);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_read() failed: %i.", ret);
+		log_err(ctx, "transport_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	num = buffer_get_u16(buf, 2);
 	entry_size = buffer_get_u16(buf, 4);
-	addinfo_size = buffer_get_u16(buf, 6);
+	info_size = buffer_get_u16(buf, 6);
 
 	if (num > JAYLINK_MAX_CONNECTIONS) {
 		log_err(ctx, "Maximum number of device connections exceeded: "
@@ -1157,7 +1410,7 @@ JAYLINK_API int jaylink_unregister(struct jaylink_device_handle *devh,
 	}
 
 	table_size = num * entry_size;
-	size = REG_HEADER_SIZE + table_size + addinfo_size;
+	size = REG_HEADER_SIZE + table_size + info_size;
 
 	if (size > REG_MAX_SIZE) {
 		log_err(ctx, "Maximum registration information size exceeded: "
@@ -1169,7 +1422,8 @@ JAYLINK_API int jaylink_unregister(struct jaylink_device_handle *devh,
 		ret = transport_start_read(devh, size - REG_MIN_SIZE);
 
 		if (ret != JAYLINK_OK) {
-			log_err(ctx, "transport_start_read() failed: %i.", ret);
+			log_err(ctx, "transport_start_read() failed: %s.",
+				jaylink_strerror(ret));
 			return JAYLINK_ERR;
 		}
 
@@ -1177,18 +1431,15 @@ JAYLINK_API int jaylink_unregister(struct jaylink_device_handle *devh,
 			size - REG_MIN_SIZE);
 
 		if (ret != JAYLINK_OK) {
-			log_err(ctx, "transport_read() failed: %i.", ret);
+			log_err(ctx, "transport_read() failed: %s.",
+				jaylink_strerror(ret));
 			return JAYLINK_ERR;
 		}
 	}
 
-	parse_conntable(connections, buf + REG_HEADER_SIZE, num, entry_size);
+	parse_conn_table(connections, buf + REG_HEADER_SIZE, num, entry_size);
 
-	if (info)
-		memcpy(info, buf + REG_HEADER_SIZE + table_size, addinfo_size);
+	*count = num;
 
-	if (info_size)
-		*info_size = addinfo_size;
-
-	return num;
+	return JAYLINK_OK;
 }

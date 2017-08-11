@@ -1,7 +1,7 @@
 /*
  * This file is part of the libjaylink project.
  *
- * Copyright (C) 2014-2015 Marc Schink <jaylink-dev@marcschink.de>
+ * Copyright (C) 2014-2016 Marc Schink <jaylink-dev@marcschink.de>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,10 +23,15 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include <sys/types.h>
-#include <libusb.h>
+#include <stdarg.h>
 
 #include "libjaylink.h"
+
+/*
+ * libusb.h includes windows.h and therefore must be included after anything
+ * that includes winsock2.h.
+ */
+#include <libusb.h>
 
 /**
  * @file
@@ -53,8 +58,10 @@ struct jaylink_context {
 	 * Used to prevent multiple device instances for the same device.
 	 */
 	struct list *devs;
+	/** List of recently discovered devices. */
+	struct list *discovered_devs;
 	/** Current log level. */
-	int log_level;
+	enum jaylink_log_level log_level;
 	/** Log callback function. */
 	jaylink_log_callback log_callback;
 	/** User data to be passed to the log callback function. */
@@ -67,7 +74,7 @@ struct jaylink_device {
 	/** libjaylink context. */
 	struct jaylink_context *ctx;
 	/** Number of references held on this device instance. */
-	int refcnt;
+	size_t ref_count;
 	/** Host interface. */
 	enum jaylink_host_interface interface;
 	/** libusb device instance. */
@@ -130,7 +137,7 @@ struct list {
 	struct list *next;
 };
 
-typedef bool (*list_compare_callback)(const void *a, const void *b);
+typedef bool (*list_compare_callback)(const void *data, const void *user_data);
 
 /*--- buffer.c --------------------------------------------------------------*/
 
@@ -146,23 +153,20 @@ JAYLINK_PRIV uint32_t buffer_get_u32(const uint8_t *buffer, size_t offset);
 JAYLINK_PRIV struct jaylink_device *device_allocate(
 		struct jaylink_context *ctx);
 
-/*--- discovery.c -----------------------------------------------------------*/
-
-JAYLINK_PRIV ssize_t discovery_get_device_list(struct jaylink_context *ctx,
-		struct jaylink_device ***list);
-
 /*--- list.c ----------------------------------------------------------------*/
 
 JAYLINK_PRIV struct list *list_prepend(struct list *list, void *data);
 JAYLINK_PRIV struct list *list_remove(struct list *list, const void *data);
 JAYLINK_PRIV struct list *list_find_custom(struct list *list,
-		list_compare_callback cb, const void *cb_data);
+		list_compare_callback callback, const void *user_data);
+JAYLINK_PRIV size_t list_length(struct list *list);
 JAYLINK_PRIV void list_free(struct list *list);
 
 /*--- log.c -----------------------------------------------------------------*/
 
-JAYLINK_PRIV int log_vprintf(const struct jaylink_context *ctx, int level,
-		const char *format, va_list args, void *user_data);
+JAYLINK_PRIV int log_vprintf(const struct jaylink_context *ctx,
+		enum jaylink_log_level level, const char *format, va_list args,
+		void *user_data);
 JAYLINK_PRIV void log_err(const struct jaylink_context *ctx,
 		const char *format, ...);
 JAYLINK_PRIV void log_warn(const struct jaylink_context *ctx,

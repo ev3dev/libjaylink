@@ -41,6 +41,8 @@
 #define SWO_PARAM_BAUDRATE	0x02
 #define SWO_PARAM_READ_SIZE	0x03
 #define SWO_PARAM_BUFFER_SIZE	0x04
+
+#define SWO_ERR			0x80000000
 /** @endcond */
 
 /**
@@ -57,10 +59,14 @@
  * @retval JAYLINK_OK Success.
  * @retval JAYLINK_ERR_ARG Invalid arguments.
  * @retval JAYLINK_ERR_TIMEOUT A timeout occurred.
+ * @retval JAYLINK_ERR_IO Input/output error.
  * @retval JAYLINK_ERR_DEV Unspecified device error.
  * @retval JAYLINK_ERR Other error conditions.
  *
- * @see jaylink_get_free_memory() to retrieve free memory size of a device.
+ * @see jaylink_swo_get_speeds()
+ * @see jaylink_get_free_memory()
+ *
+ * @since 0.1.0
  */
 JAYLINK_API int jaylink_swo_start(struct jaylink_device_handle *devh,
 		enum jaylink_swo_mode mode, uint32_t baudrate, uint32_t size)
@@ -68,7 +74,7 @@ JAYLINK_API int jaylink_swo_start(struct jaylink_device_handle *devh,
 	int ret;
 	struct jaylink_context *ctx;
 	uint8_t buf[32];
-	uint32_t tmp;
+	uint32_t status;
 
 	if (!devh || !baudrate || !size)
 		return JAYLINK_ERR_ARG;
@@ -80,7 +86,8 @@ JAYLINK_API int jaylink_swo_start(struct jaylink_device_handle *devh,
 	ret = transport_start_write_read(devh, 21, 4, true);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_write_read() failed: %i.", ret);
+		log_err(ctx, "transport_start_write_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -104,21 +111,23 @@ JAYLINK_API int jaylink_swo_start(struct jaylink_device_handle *devh,
 	ret = transport_write(devh, buf, 21);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_write() failed: %i.", ret);
+		log_err(ctx, "transport_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_read(devh, buf, 4);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_read() failed: %i.", ret);
+		log_err(ctx, "transport_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
-	tmp = buffer_get_u32(buf, 0);
+	status = buffer_get_u32(buf, 0);
 
-	if (tmp > 0) {
-		log_err(ctx, "Failed to start capture: %u.", tmp);
+	if (status > 0) {
+		log_err(ctx, "Failed to start capture: 0x%x.", status);
 		return JAYLINK_ERR_DEV;
 	}
 
@@ -136,15 +145,20 @@ JAYLINK_API int jaylink_swo_start(struct jaylink_device_handle *devh,
  * @retval JAYLINK_OK Success.
  * @retval JAYLINK_ERR_ARG Invalid arguments.
  * @retval JAYLINK_ERR_TIMEOUT A timeout occurred.
+ * @retval JAYLINK_ERR_IO Input/output error.
  * @retval JAYLINK_ERR_DEV Unspecified device error.
  * @retval JAYLINK_ERR Other error conditions.
+ *
+ * @see jaylink_swo_start()
+ *
+ * @since 0.1.0
  */
 JAYLINK_API int jaylink_swo_stop(struct jaylink_device_handle *devh)
 {
 	int ret;
 	struct jaylink_context *ctx;
 	uint8_t buf[4];
-	uint32_t tmp;
+	uint32_t status;
 
 	if (!devh)
 		return JAYLINK_ERR_ARG;
@@ -153,7 +167,8 @@ JAYLINK_API int jaylink_swo_stop(struct jaylink_device_handle *devh)
 	ret = transport_start_write_read(devh, 3, 4, true);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_write_read() failed: %i.", ret);
+		log_err(ctx, "transport_start_write_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -164,21 +179,23 @@ JAYLINK_API int jaylink_swo_stop(struct jaylink_device_handle *devh)
 	ret = transport_write(devh, buf, 3);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_write() failed: %i.", ret);
+		log_err(ctx, "transport_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_read(devh, buf, 4);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_read() failed: %i.", ret);
+		log_err(ctx, "transport_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
-	tmp = buffer_get_u32(buf, 0);
+	status = buffer_get_u32(buf, 0);
 
-	if (tmp > 0) {
-		log_err(ctx, "Failed to stop capture: %u.", tmp);
+	if (status > 0) {
+		log_err(ctx, "Failed to stop capture: 0x%x.", status);
 		return JAYLINK_ERR_DEV;
 	}
 
@@ -202,8 +219,13 @@ JAYLINK_API int jaylink_swo_stop(struct jaylink_device_handle *devh)
  * @retval JAYLINK_ERR_ARG Invalid arguments.
  * @retval JAYLINK_ERR_TIMEOUT A timeout occurred.
  * @retval JAYLINK_ERR_PROTO Protocol violation.
+ * @retval JAYLINK_ERR_IO Input/output error.
  * @retval JAYLINK_ERR_DEV Unspecified device error.
  * @retval JAYLINK_ERR Other error conditions.
+ *
+ * @see jaylink_swo_start()
+ *
+ * @since 0.1.0
  */
 JAYLINK_API int jaylink_swo_read(struct jaylink_device_handle *devh,
 		uint8_t *buffer, uint32_t *length)
@@ -211,6 +233,7 @@ JAYLINK_API int jaylink_swo_read(struct jaylink_device_handle *devh,
 	int ret;
 	struct jaylink_context *ctx;
 	uint8_t buf[32];
+	uint32_t status;
 	uint32_t tmp;
 
 	if (!devh || !buffer || !length)
@@ -220,7 +243,8 @@ JAYLINK_API int jaylink_swo_read(struct jaylink_device_handle *devh,
 	ret = transport_start_write_read(devh, 9, 8, true);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_write_read() failed: %i.", ret);
+		log_err(ctx, "transport_start_write_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -236,24 +260,20 @@ JAYLINK_API int jaylink_swo_read(struct jaylink_device_handle *devh,
 	ret = transport_write(devh, buf, 9);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_write() failed: %i.", ret);
+		log_err(ctx, "transport_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_read(devh, buf, 8);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_read() failed: %i.", ret);
+		log_err(ctx, "transport_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
-	tmp = buffer_get_u32(buf, 0);
-
-	if (tmp > 0) {
-		log_err(ctx, "Failed to read data: %u.", tmp);
-		return JAYLINK_ERR_DEV;
-	}
-
+	status = buffer_get_u32(buf, 0);
 	tmp = buffer_get_u32(buf, 4);
 
 	if (tmp > *length) {
@@ -268,16 +288,23 @@ JAYLINK_API int jaylink_swo_read(struct jaylink_device_handle *devh,
 		ret = transport_start_read(devh, tmp);
 
 		if (ret != JAYLINK_OK) {
-			log_err(ctx, "transport_start_read() failed: %i.", ret);
+			log_err(ctx, "transport_start_read() failed: %s.",
+				jaylink_strerror(ret));
 			return ret;
 		}
 
 		ret = transport_read(devh, buffer, tmp);
 
 		if (ret != JAYLINK_OK) {
-			log_err(ctx, "transport_read() failed: %i.", ret);
+			log_err(ctx, "transport_read() failed: %s.",
+				jaylink_strerror(ret));
 			return ret;
 		}
+	}
+
+	if (status > 0) {
+		log_err(ctx, "Failed to read data: 0x%x.", status);
+		return JAYLINK_ERR_DEV;
 	}
 
 	return JAYLINK_OK;
@@ -309,8 +336,11 @@ JAYLINK_API int jaylink_swo_read(struct jaylink_device_handle *devh,
  * @retval JAYLINK_ERR_ARG Invalid arguments.
  * @retval JAYLINK_ERR_TIMEOUT A timeout occurred.
  * @retval JAYLINK_ERR_PROTO Protocol violation.
+ * @retval JAYLINK_ERR_IO Input/output error.
  * @retval JAYLINK_ERR_DEV Unspecified device error.
  * @retval JAYLINK_ERR Other error conditions.
+ *
+ * @since 0.1.0
  */
 JAYLINK_API int jaylink_swo_get_speeds(struct jaylink_device_handle *devh,
 		enum jaylink_swo_mode mode, struct jaylink_swo_speed *speed)
@@ -318,6 +348,7 @@ JAYLINK_API int jaylink_swo_get_speeds(struct jaylink_device_handle *devh,
 	int ret;
 	struct jaylink_context *ctx;
 	uint8_t buf[24];
+	uint32_t tmp;
 	uint32_t length;
 
 	if (!devh || !speed)
@@ -330,7 +361,8 @@ JAYLINK_API int jaylink_swo_get_speeds(struct jaylink_device_handle *devh,
 	ret = transport_start_write_read(devh, 9, 4, true);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_write_read() failed: %i.", ret);
+		log_err(ctx, "transport_start_write_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
@@ -346,23 +378,28 @@ JAYLINK_API int jaylink_swo_get_speeds(struct jaylink_device_handle *devh,
 	ret = transport_write(devh, buf, 9);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_write() failed: %i.", ret);
+		log_err(ctx, "transport_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_read(devh, buf, 4);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_read() failed: %i.", ret);
+		log_err(ctx, "transport_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
-	length = buffer_get_u32(buf, 0);
+	tmp = buffer_get_u32(buf, 0);
 
-	if (length == 0xffffffff) {
-		log_err(ctx, "Failed to retrieve speed information.");
+	if (tmp & SWO_ERR) {
+		log_err(ctx, "Failed to retrieve speed information: 0x%x.",
+			tmp);
 		return JAYLINK_ERR_DEV;
 	}
+
+	length = tmp;
 
 	if (length != 28) {
 		log_err(ctx, "Unexpected number of bytes received: %u.",
@@ -374,14 +411,16 @@ JAYLINK_API int jaylink_swo_get_speeds(struct jaylink_device_handle *devh,
 	ret = transport_start_read(devh, length);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_read() failed: %i.", ret);
+		log_err(ctx, "transport_start_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_read(devh, buf, length);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_read() failed: %i.", ret);
+		log_err(ctx, "transport_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 

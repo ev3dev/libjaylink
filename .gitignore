@@ -8,12 +8,15 @@ configure
 configure.gnu
 .deps
 doxy/
+Doxyfile
+INSTALL
 *.la
 libjaylink.pc
 .libs
 libtool
 *.lo
-m4
+m4/libtool.m4
+m4/lt*.m4
 Makefile
 Makefile.in
 *.o

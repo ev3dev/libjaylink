@@ -31,6 +31,12 @@
 
 /** @cond PRIVATE */
 #define CMD_SWD_IO 0xcf
+
+/**
+ * Error code indicating that there is not enough free memory on the device to
+ * perform the SWD I/O operation.
+ */
+#define SWD_IO_ERR_NO_MEMORY	0x06
 /** @endcond */
 
 /**
@@ -42,8 +48,8 @@
  * @param[in,out] devh Device handle.
  * @param[in] direction Buffer to read the transfer direction from.
  * @param[in] out Buffer to read host-to-target data from.
- * @param[out] in Buffer to store target-to-host data on success. Its content is
- *                undefined on failure. The buffer must be large enough to
+ * @param[out] in Buffer to store target-to-host data on success. Its content
+ *                is undefined on failure. The buffer must be large enough to
  *                contain at least the specified number of bits to transfer.
  * @param[in] length Total number of bits to transfer from host to target and
  *                   vice versa.
@@ -51,12 +57,16 @@
  * @retval JAYLINK_OK Success.
  * @retval JAYLINK_ERR_ARG Invalid arguments.
  * @retval JAYLINK_ERR_TIMEOUT A timeout occurred.
+ * @retval JAYLINK_ERR_IO Input/output error.
+ * @retval JAYLINK_ERR_DEV_NO_MEMORY Not enough memory on the device to perform
+ *                                   the operation.
  * @retval JAYLINK_ERR_DEV Unspecified device error.
  * @retval JAYLINK_ERR Other error conditions.
  *
- * @see jaylink_select_interface() to select the target interface.
- * @see jaylink_get_available_interfaces() to retrieve the available target
- *                                         interfaces.
+ * @see jaylink_select_interface()
+ * @see jaylink_set_speed()
+ *
+ * @since 0.1.0
  */
 JAYLINK_API int jaylink_swd_io(struct jaylink_device_handle *devh,
 		const uint8_t *direction, const uint8_t *out, uint8_t *in,
@@ -78,52 +88,59 @@ JAYLINK_API int jaylink_swd_io(struct jaylink_device_handle *devh,
 		num_bytes + 1, true);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_start_write_read() failed: %i.", ret);
+		log_err(ctx, "transport_start_write_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	buf[0] = CMD_SWD_IO;
-	/* Dummy byte. */
 	buf[1] = 0x00;
 	buffer_set_u16(buf, length, 2);
 
 	ret = transport_write(devh, buf, 4);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_write() failed: %i.", ret);
+		log_err(ctx, "transport_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_write(devh, direction, num_bytes);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_write() failed: %i.", ret);
+		log_err(ctx, "transport_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_write(devh, out, num_bytes);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_write() failed: %i.", ret);
+		log_err(ctx, "transport_write() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_read(devh, in, num_bytes);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_read() failed: %i.", ret);
+		log_err(ctx, "transport_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
 	ret = transport_read(devh, &status, 1);
 
 	if (ret != JAYLINK_OK) {
-		log_err(ctx, "transport_read() failed: %i.", ret);
+		log_err(ctx, "transport_read() failed: %s.",
+			jaylink_strerror(ret));
 		return ret;
 	}
 
-	if (status > 0) {
-		log_err(ctx, "SWD I/O operation failed: %02x.", status);
+	if (status == SWD_IO_ERR_NO_MEMORY) {
+		return JAYLINK_ERR_DEV_NO_MEMORY;
+	} else if (status > 0) {
+		log_err(ctx, "SWD I/O operation failed: 0x%x.", status);
 		return JAYLINK_ERR_DEV;
 	}
 

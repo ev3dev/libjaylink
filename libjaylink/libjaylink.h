@@ -1,7 +1,7 @@
 /*
  * This file is part of the libjaylink project.
  *
- * Copyright (C) 2014-2015 Marc Schink <jaylink-dev@marcschink.de>
+ * Copyright (C) 2014-2016 Marc Schink <jaylink-dev@marcschink.de>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -20,10 +20,15 @@
 #ifndef LIBJAYLINK_LIBJAYLINK_H
 #define LIBJAYLINK_LIBJAYLINK_H
 
+#include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdarg.h>
-#include <sys/types.h>
+#ifdef _WIN32
+#include <ws2tcpip.h>
+#else
+#include <arpa/inet.h>
+#endif
 
 /**
  * @file
@@ -35,12 +40,12 @@
 enum jaylink_error {
 	/** No error. */
 	JAYLINK_OK = 0,
-	/** Unspecific error. */
+	/** Unspecified error. */
 	JAYLINK_ERR = -1,
-	/** Memory allocation error. */
-	JAYLINK_ERR_MALLOC = -2,
 	/** Invalid argument. */
-	JAYLINK_ERR_ARG = -3,
+	JAYLINK_ERR_ARG = -2,
+	/** Memory allocation error. */
+	JAYLINK_ERR_MALLOC = -3,
 	/** Timeout occurred. */
 	JAYLINK_ERR_TIMEOUT = -4,
 	/** Protocol violation. */
@@ -49,12 +54,16 @@ enum jaylink_error {
 	JAYLINK_ERR_NOT_AVAILABLE = -6,
 	/** Operation not supported. */
 	JAYLINK_ERR_NOT_SUPPORTED = -7,
+	/** Input/output error. */
+	JAYLINK_ERR_IO = -8,
 	/** Device: unspecified error. */
 	JAYLINK_ERR_DEV = -1000,
 	/** Device: operation not supported. */
 	JAYLINK_ERR_DEV_NOT_SUPPORTED = -1001,
 	/** Device: entity not available. */
-	JAYLINK_ERR_DEV_NOT_AVAILABLE = -1002
+	JAYLINK_ERR_DEV_NOT_AVAILABLE = -1002,
+	/** Device: not enough memory to perform operation. */
+	JAYLINK_ERR_DEV_NO_MEMORY = -1003
 };
 
 /** libjaylink log levels. */
@@ -76,6 +85,12 @@ enum jaylink_log_level {
 
 /** Maximum length of a libjaylink log domain in bytes. */
 #define JAYLINK_LOG_DOMAIN_MAX_LENGTH	32
+
+/** libjaylink capabilities. */
+enum jaylink_capability {
+	/** Library supports USB as host interface. */
+	JAYLINK_CAP_HIF_USB = 0
+};
 
 /** Host interfaces. */
 enum jaylink_host_interface {
@@ -142,7 +157,7 @@ enum jaylink_hardware_info {
 	 * This indicates whether the target power supply on pin 19 of the
 	 * 20-pin JTAG / SWD connector is enabled or disabled.
 	 *
-	 * @see jaylink_set_target_power() to set the target power supply.
+	 * @see jaylink_set_target_power()
 	 */
 	JAYLINK_HW_INFO_TARGET_POWER = (1 << 0),
 	/** Current consumption of the target in mA. */
@@ -153,8 +168,12 @@ enum jaylink_hardware_info {
 
 /** Device hardware types. */
 enum jaylink_hardware_type {
-	/** J-Link BASE. */
-	JAYLINK_HW_TYPE_BASE = 0
+	/** J-Link. */
+	JAYLINK_HW_TYPE_JLINK = 0,
+	/** Flasher. */
+	JAYLINK_HW_TYPE_FLASHER = 2,
+	/** J-Link Pro. */
+	JAYLINK_HW_TYPE_JLINK_PRO = 3
 };
 
 /** Target interfaces. */
@@ -169,13 +188,7 @@ enum jaylink_target_interface {
 	JAYLINK_TIF_FINE = 3,
 	/** 2-wire JTAG for PIC32 compliant devices. */
 	JAYLINK_TIF_2W_JTAG_PIC32 = 4,
-
-	/** <i>Helper which must be always the last element</i>. */
-	__JAYLINK_TIF_MAX
 };
-
-/** Maximum valid target interface number. */
-#define JAYLINK_TIF_MAX (__JAYLINK_TIF_MAX - 1)
 
 /**
  * JTAG command versions.
@@ -188,17 +201,25 @@ enum jaylink_jtag_version {
 	 * JTAG command version 2.
 	 *
 	 * This version is obsolete for major hardware version 5 and above. Use
-	 * #JAYLINK_JTAG_V3 for these versions instead.
+	 * #JAYLINK_JTAG_VERSION_3 for these versions instead.
 	 */
-	JAYLINK_JTAG_V2 = 1,
+	JAYLINK_JTAG_VERSION_2 = 1,
 	/** JTAG command version 3. */
-	JAYLINK_JTAG_V3 = 2
+	JAYLINK_JTAG_VERSION_3 = 2
 };
 
 /** Serial Wire Output (SWO) capture modes. */
 enum jaylink_swo_mode {
-	/** UART capture mode. */
+	/** Universal Asynchronous Receiver Transmitter (UART). */
 	JAYLINK_SWO_MODE_UART = 0
+};
+
+/** Target interface speed information. */
+struct jaylink_speed {
+	/** Base frequency in Hz. */
+	uint32_t freq;
+	/** Minimum frequency divider. */
+	uint16_t div;
 };
 
 /** Serial Wire Output (SWO) speed information. */
@@ -217,12 +238,8 @@ struct jaylink_swo_speed {
 
 /** Device hardware version. */
 struct jaylink_hardware_version {
-	/**
-	 * Hardware type.
-	 *
-	 * See #jaylink_hardware_type for a description of the hardware types.
-	 */
-	uint8_t type;
+	/** Hardware type. */
+	enum jaylink_hardware_type type;
 	/** Major version. */
 	uint8_t major;
 	/** Minor version. */
@@ -263,9 +280,11 @@ struct jaylink_connection {
 	/**
 	 * Host ID (HID).
 	 *
-	 * IP address of the client in network byte order.
+	 * IPv4 address string of the client in quad-dotted decimal format
+	 * (e.g. 192.0.2.235). The address 0.0.0.0 should be used for the
+	 * registration of an USB connection.
 	 */
-	uint32_t hid;
+	char hid[INET_ADDRSTRLEN];
 	/** IID. */
 	uint8_t iid;
 	/** CID. */
@@ -343,41 +362,57 @@ struct jaylink_device_handle;
 #define JAYLINK_API __attribute__ ((visibility ("default")))
 #endif
 
-/** Log callback function type. */
+/**
+ * Log callback function type.
+ *
+ * @param[in] ctx libjaylink context.
+ * @param[in] level Log level.
+ * @param[in] format Message format in printf()-style.
+ * @param[in] args Message arguments.
+ * @param[in,out] user_data User data passed to the callback function.
+ *
+ * @return Number of characters printed on success, or a negative error code on
+ *         failure.
+ */
 typedef int (*jaylink_log_callback)(const struct jaylink_context *ctx,
-		int level, const char *format, va_list args, void *user_data);
+		enum jaylink_log_level level, const char *format, va_list args,
+		void *user_data);
 
 /*--- core.c ----------------------------------------------------------------*/
 
 JAYLINK_API int jaylink_init(struct jaylink_context **ctx);
-JAYLINK_API void jaylink_exit(struct jaylink_context *ctx);
+JAYLINK_API int jaylink_exit(struct jaylink_context *ctx);
+JAYLINK_API bool jaylink_library_has_cap(enum jaylink_capability cap);
 
 /*--- device.c --------------------------------------------------------------*/
 
-JAYLINK_API ssize_t jaylink_get_device_list(struct jaylink_context *ctx,
-		struct jaylink_device ***devices);
-JAYLINK_API void jaylink_free_device_list(struct jaylink_device **devices,
-		bool unref_devices);
+JAYLINK_API int jaylink_get_devices(struct jaylink_context *ctx,
+		struct jaylink_device ***devs, size_t *count);
+JAYLINK_API void jaylink_free_devices(struct jaylink_device **devs,
+		bool unref);
 JAYLINK_API int jaylink_device_get_host_interface(
 		const struct jaylink_device *dev,
-		enum jaylink_host_interface *interface);
+		enum jaylink_host_interface *iface);
 JAYLINK_API int jaylink_device_get_serial_number(
 		const struct jaylink_device *dev, uint32_t *serial_number);
-JAYLINK_API int jaylink_device_get_usb_address(const struct jaylink_device *dev,
+JAYLINK_API int jaylink_device_get_usb_address(
+		const struct jaylink_device *dev,
 		enum jaylink_usb_address *address);
 JAYLINK_API struct jaylink_device *jaylink_ref_device(
 		struct jaylink_device *dev);
 JAYLINK_API void jaylink_unref_device(struct jaylink_device *dev);
 JAYLINK_API int jaylink_open(struct jaylink_device *dev,
 		struct jaylink_device_handle **devh);
-JAYLINK_API void jaylink_close(struct jaylink_device_handle *devh);
+JAYLINK_API int jaylink_close(struct jaylink_device_handle *devh);
 JAYLINK_API struct jaylink_device *jaylink_get_device(
 		struct jaylink_device_handle *devh);
-JAYLINK_API int jaylink_get_firmware_version(struct jaylink_device_handle *devh,
-		char **version, size_t *length);
+JAYLINK_API int jaylink_get_firmware_version(
+		struct jaylink_device_handle *devh, char **version,
+		size_t *length);
 JAYLINK_API int jaylink_get_hardware_info(struct jaylink_device_handle *devh,
 		uint32_t mask, uint32_t *info);
-JAYLINK_API int jaylink_get_hardware_version(struct jaylink_device_handle *devh,
+JAYLINK_API int jaylink_get_hardware_version(
+		struct jaylink_device_handle *devh,
 		struct jaylink_hardware_version *version);
 JAYLINK_API int jaylink_get_hardware_status(struct jaylink_device_handle *devh,
 		struct jaylink_hardware_status *status);
@@ -393,12 +428,15 @@ JAYLINK_API int jaylink_write_raw_config(struct jaylink_device_handle *devh,
 		const uint8_t *config);
 JAYLINK_API int jaylink_register(struct jaylink_device_handle *devh,
 		struct jaylink_connection *connection,
-		struct jaylink_connection *connections, uint8_t *info,
-		uint16_t *info_size);
+		struct jaylink_connection *connections, size_t *count);
 JAYLINK_API int jaylink_unregister(struct jaylink_device_handle *devh,
 		const struct jaylink_connection *connection,
-		struct jaylink_connection *connections, uint8_t *info,
-		uint16_t *info_size);
+		struct jaylink_connection *connections, size_t *count);
+
+/*--- discovery.c -----------------------------------------------------------*/
+
+JAYLINK_API int jaylink_discovery_scan(struct jaylink_context *ctx,
+		uint32_t ifaces);
 
 /*--- emucom.c --------------------------------------------------------------*/
 
@@ -429,20 +467,27 @@ JAYLINK_API int jaylink_file_delete(struct jaylink_device_handle *devh,
 
 JAYLINK_API int jaylink_jtag_io(struct jaylink_device_handle *devh,
 		const uint8_t *tms, const uint8_t *tdi, uint8_t *tdo,
-		uint16_t length, int version);
+		uint16_t length, enum jaylink_jtag_version version);
 JAYLINK_API int jaylink_jtag_clear_trst(struct jaylink_device_handle *devh);
 JAYLINK_API int jaylink_jtag_set_trst(struct jaylink_device_handle *devh);
 
 /*--- log.c -----------------------------------------------------------------*/
 
-JAYLINK_API int jaylink_log_set_level(struct jaylink_context *ctx, int level);
-JAYLINK_API int jaylink_log_get_level(const struct jaylink_context *ctx);
+JAYLINK_API int jaylink_log_set_level(struct jaylink_context *ctx,
+		enum jaylink_log_level level);
+JAYLINK_API int jaylink_log_get_level(const struct jaylink_context *ctx,
+		enum jaylink_log_level *level);
 JAYLINK_API int jaylink_log_set_callback(struct jaylink_context *ctx,
 		jaylink_log_callback callback, void *user_data);
 JAYLINK_API int jaylink_log_set_domain(struct jaylink_context *ctx,
-		char *domain);
+		const char *domain);
 JAYLINK_API const char *jaylink_log_get_domain(
 		const struct jaylink_context *ctx);
+
+/*--- strutil.c -------------------------------------------------------------*/
+
+JAYLINK_API int jaylink_parse_serial_number(const char *str,
+		uint32_t *serial_number);
 
 /*--- swd.c -----------------------------------------------------------------*/
 
@@ -465,15 +510,15 @@ JAYLINK_API int jaylink_swo_get_speeds(struct jaylink_device_handle *devh,
 JAYLINK_API int jaylink_set_speed(struct jaylink_device_handle *devh,
 		uint16_t speed);
 JAYLINK_API int jaylink_get_speeds(struct jaylink_device_handle *devh,
-		uint32_t *freq, uint16_t *div);
+		struct jaylink_speed *speed);
 JAYLINK_API int jaylink_select_interface(struct jaylink_device_handle *devh,
-		enum jaylink_target_interface interface,
-		enum jaylink_target_interface *prev_interface);
+		enum jaylink_target_interface iface,
+		enum jaylink_target_interface *prev_iface);
 JAYLINK_API int jaylink_get_available_interfaces(
-		struct jaylink_device_handle *devh, uint32_t *interfaces);
+		struct jaylink_device_handle *devh, uint32_t *ifaces);
 JAYLINK_API int jaylink_get_selected_interface(
 		struct jaylink_device_handle *devh,
-		enum jaylink_target_interface *interface);
+		enum jaylink_target_interface *iface);
 JAYLINK_API int jaylink_clear_reset(struct jaylink_device_handle *devh);
 JAYLINK_API int jaylink_set_reset(struct jaylink_device_handle *devh);
 JAYLINK_API int jaylink_set_target_power(struct jaylink_device_handle *devh,
@@ -489,10 +534,10 @@ JAYLINK_API int jaylink_version_package_get_major(void);
 JAYLINK_API int jaylink_version_package_get_minor(void);
 JAYLINK_API int jaylink_version_package_get_micro(void);
 JAYLINK_API const char *jaylink_version_package_get_string(void);
-JAYLINK_API int jaylink_version_lib_get_current(void);
-JAYLINK_API int jaylink_version_lib_get_revision(void);
-JAYLINK_API int jaylink_version_lib_get_age(void);
-JAYLINK_API const char *jaylink_version_lib_get_string(void);
+JAYLINK_API int jaylink_version_library_get_current(void);
+JAYLINK_API int jaylink_version_library_get_revision(void);
+JAYLINK_API int jaylink_version_library_get_age(void);
+JAYLINK_API const char *jaylink_version_library_get_string(void);
 
 #include "version.h"
 
