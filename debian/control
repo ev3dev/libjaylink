@@ -3,7 +3,7 @@ Priority: optional
 Maintainer: Debian Electronics Packaging Team <pkg-electronics-devel@lists.alioth.debian.org>
 Uploaders: Jonathan McDowell <noodles@earth.li>
 Build-Depends: debhelper (>= 10)
-Standards-Version: 3.9.8
+Standards-Version: 4.0.1
 Section: libs
 Homepage: http://git.zapb.de/libjaylink.git
 Vcs-Git: https://anonscm.debian.org/git/collab-maint/libjaylink.git -b debian
