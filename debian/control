@@ -2,7 +2,7 @@ Source: libjaylink
 Priority: optional
 Maintainer: Debian Electronics Packaging Team <pkg-electronics-devel@lists.alioth.debian.org>
 Uploaders: Jonathan McDowell <noodles@earth.li>
-Build-Depends: debhelper (>= 10)
+Build-Depends: debhelper (>= 10), pkg-config, libusb-1.0-0-dev
 Standards-Version: 4.0.1
 Section: libs
 Homepage: http://git.zapb.de/libjaylink.git
