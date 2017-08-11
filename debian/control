@@ -1,6 +1,7 @@
 Source: libjaylink
 Priority: optional
-Maintainer: Christian M. Amsüss <chrysn@fsfe.org>
+Maintainer: Debian Electronics Packaging Team <pkg-electronics-devel@lists.alioth.debian.org>
+Uploaders: Jonathan McDowell <noodles@earth.li>
 Build-Depends: debhelper (>= 9), autotools-dev
 Standards-Version: 3.9.8
 Section: libs
