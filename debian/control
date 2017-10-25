@@ -1,13 +1,12 @@
 Source: libjaylink
 Priority: optional
-Maintainer: Debian Electronics Packaging Team <pkg-electronics-devel@lists.alioth.debian.org>
-Uploaders: Jonathan McDowell <noodles@earth.li>
+Maintainer: David Lechner <david@lechnology.com>
 Build-Depends: debhelper (>= 10), pkg-config, libusb-1.0-0-dev
-Standards-Version: 4.0.1
+Standards-Version: 3.9.8
 Section: libs
 Homepage: http://git.zapb.de/libjaylink.git
-Vcs-Git: https://anonscm.debian.org/git/collab-maint/libjaylink.git -b debian
-Vcs-Browser: https://anonscm.debian.org/cgit/collab-maint/libjaylink.git
+Vcs-Git: https://github.com/ev3dev/libjaylink.git
+Vcs-Browser: https://github.com/ev3dev/libjaylink
 
 Package: libjaylink-dev
 Section: libdevel
